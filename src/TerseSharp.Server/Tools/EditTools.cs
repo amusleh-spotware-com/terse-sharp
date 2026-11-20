@@ -281,7 +281,7 @@ public sealed class EditTools(ToolContext context)
                     var options = Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy);
 
                     return renameFile
-                        ? RenameService.RenameWithFileAsync(loaded, resolved, newName, options, cancellationToken)
+                        ? StagedDeletions.NotedAsync(loaded.Root, () => RenameService.RenameWithFileAsync(loaded, resolved, newName, options, cancellationToken), dryRun, cancellationToken)
                         : RenameService.RenameAsync(loaded, resolved, newName, options, cancellationToken);
                 }, cancellationToken);
 

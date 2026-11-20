@@ -43,6 +43,55 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnEditBesidePreExistingErrors_NamesTheFileThatHoldsThem()
+    {
+        var text = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["body"] = "{ return 3; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors in scope: ", text, StringComparison.Ordinal);
+        Assert.Contains("Calculator.cs 1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnEditCallingAMemberNoFileDeclaresYet_NamesItAndTheOneCallThatLandsBoth()
+    {
+        var text = await CallAsync("edit_text", new()
+        {
+            ["path"] = CalculatorPath,
+            ["oldText"] = "public int Healthy() => 1;",
+            ["newText"] = "public int Healthy() => this.NotYetWritten();",
+        });
+
+        Assert.StartsWith("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("the edit uses Calculator.NotYetWritten, which nothing declares - a typo is fixed in the edit; a member another pending edit adds: send the edit that declares it in the same edits=[...] batch", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TwoConcurrentWritesToOneFile_BothLand()
+    {
+        var body = CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["body"] = "=> 2",
+        });
+        var member = CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Broken.Calculator",
+            ["declaration"] = "public int Added() => 3;",
+        });
+
+        await Task.WhenAll(body, member);
+        var text = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
+
+        Assert.Contains("Healthy() => 2", text, StringComparison.Ordinal);
+        Assert.Contains("Added() => 3", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ADryRunThatWouldBreakTheBuild_SaysSoInsteadOfReportingAZeroDelta()
     {
         var text = await CallAsync("replace_symbol_body", new()

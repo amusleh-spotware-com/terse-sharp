@@ -87,6 +87,7 @@ public static class Errors
         { Callers: { Count: > 0 } callers } => Broken(callers, tool),
         { Implementers: { Count: > 0 } implementers } => Unimplemented(implementers, tool),
         { Fields: { Count: > 0 } fields } => Unassigned(fields, tool),
+        { Undeclared: { Count: > 0 } members } => UndeclaredMembers.Remedy(members, tool),
         _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
         _ when tool is "write_text" or "edit_text" => "fix the edit in the content you send, or pass allowErrors=true beside the retryWith token below to apply the held text without re-sending it",
         _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
@@ -402,4 +403,5 @@ public readonly record struct RollbackHints(
     IReadOnlyList<string>? Callers = null,
     IReadOnlyList<string>? Collisions = null,
     IReadOnlyList<string>? Implementers = null,
-    IReadOnlyList<string>? Fields = null);
+    IReadOnlyList<string>? Fields = null,
+    IReadOnlyList<string>? Undeclared = null);

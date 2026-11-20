@@ -257,6 +257,56 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("analyzed=", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Gate_OverResourceFilesAlone_SkipsThemNamingTheirValidatorInsteadOfRefusing()
+    {
+        var text = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/Strings.resx", ["dryRun"] = true });
+
+        Assert.Equal("skipped  1 file(s) no project compiles as C# - resx_validate checks 1", text.Trim());
+    }
+
+    [Fact]
+    public async Task Gate_OverElevenPathsOfWhichEightAreResourceFiles_GatesTheThreeSourceFilesAndSkipsTheRest()
+    {
+        var text = await server.CallAsync("gate", new()
+        {
+            ["paths"] = new[]
+            {
+                "src/Fixture.Trading/Legacy.resx", "src/Fixture.Trading/Order.Web.resx", "src/Fixture.Trading/Scratch.fr.resx",
+                "src/Fixture.Trading/Scratch.resx", "src/Fixture.Trading/Strings.de.resx", "src/Fixture.Trading/Strings.fr.resx",
+                "src/Fixture.Trading/Strings.resx", "src/Fixture.Trading/Resources/Wide.resx",
+                "src/Fixture.Trading/Awkward.cs", "src/Fixture.Trading/Gateway.cs", "src/Fixture.Trading/Localization.cs",
+            },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("analyzed=3", text, StringComparison.Ordinal);
+        Assert.Contains("\nskipped 8 file(s) no project compiles as C# - resx_validate checks 8", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Format_NamingAGeneratedFile_LeavesItAloneAndSaysWhy()
+    {
+        var text = await server.CallAsync("format", new() { ["path"] = "src/Fixture.Trading/Strings.Designer.cs", ["dryRun"] = true });
+
+        Assert.Contains("every document in scope is generated code", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_IntoAGeneratedFile_KeepsTheGeneratorsBraceShapeInsteadOfReformattingIt()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Strings",
+            ["declaration"] = "public static string Caption_Extra {\n    get {\n        return Manager.GetString(\"Caption_Extra\", CultureInfo.CurrentUICulture) ?? string.Empty;\n    }\n}",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public static string Caption_Extra {", text, StringComparison.Ordinal);
+        Assert.Contains("+        get {", text, StringComparison.Ordinal);
+    }
+
     private static int Analyzed(string text)
     {
         var marker = text.IndexOf("analyzed=", StringComparison.Ordinal) + "analyzed=".Length;

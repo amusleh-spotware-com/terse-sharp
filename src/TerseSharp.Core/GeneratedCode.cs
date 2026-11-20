@@ -9,6 +9,9 @@ public static class GeneratedCode
     public static bool IsGenerated(string root, string? path) =>
         path is { Length: > 0 } file && (HasGeneratedSuffix(file) || InOutputDirectory(root, file));
 
+    public static bool IsGeneratedName(string? path) =>
+        path is { Length: > 0 } file && HasGeneratedSuffix(file);
+
     private static bool HasGeneratedSuffix(string file) =>
         Suffixes.Any(suffix => file.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
 

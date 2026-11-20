@@ -168,14 +168,14 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private Task<string> SourceOf(string[] requested, bool batched, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
-        [var only] when !batched => context.WithSymbolAsync(
+        [var only] when !batched => DeclaredSource.FirstAsync(context, workspace, path is { Length: > 0 } ? new SyntaxRead(only, path, format) : null, () => context.WithSymbolAsync(
             workspace,
             only,
             async (loaded, resolved) => Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)),
             cancellationToken,
             path,
             referenced: true,
-            unresolved: (loaded, error) => SourceService.OverloadsOrRefusalAsync(loaded, new(only, error, path), format, cancellationToken)),
+            unresolved: (loaded, error) => SourceService.OverloadsOrRefusalAsync(loaded, new(only, error, path), format, cancellationToken)), cancellationToken),
         _ => context.WithWorkspaceAsync(
             workspace,
             path,

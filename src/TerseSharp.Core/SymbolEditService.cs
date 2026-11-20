@@ -524,7 +524,9 @@ public static class SymbolEditService
         .ToString();
     private static async Task<SyntaxNode> IndentedAsync(Document document, CancellationToken cancellationToken)
     {
-        var formatted = await Formatter.FormatAsync(document, Formatter.Annotation, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var formatted = GeneratedCode.IsGeneratedName(document.FilePath)
+            ? document
+            : await Formatter.FormatAsync(document, Formatter.Annotation, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return await formatted.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false)
             ?? await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false)

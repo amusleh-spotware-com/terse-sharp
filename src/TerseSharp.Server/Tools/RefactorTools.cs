@@ -34,8 +34,8 @@ public sealed class RefactorTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         Aliases.Clash(new ParameterSpelling("typeSymbolId", typeSymbolId), new ParameterSpelling("symbol", symbol)) is { } clash
             ? Task.FromResult(clash)
-            : Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToFileAsync(
-            loaded, resolved, Options("move_type_to_file", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
+            : Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => StagedDeletions.NotedAsync(loaded.Root, () => RefactorService.MoveTypeToFileAsync(
+            loaded, resolved, Options("move_type_to_file", dryRun, verbose, allowPolicy), cancellationToken), dryRun, cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_namespace")]
     [Description("Change the namespace declared in the file containing a type - or, given a NESTED type, lift it out of its container to namespace level in the same file: it lands internal (public only when it and its container are both public) and every Outer.Nested reference becomes Nested, in one compile-gated edit. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]

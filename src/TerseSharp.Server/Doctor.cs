@@ -8,7 +8,7 @@ public static class Doctor
 {
     public static async Task<string> RunAsync(string? workspace, CancellationToken cancellationToken)
     {
-        var target = workspace ?? Discovered();
+        var target = workspace ?? await DiscoveredAsync(cancellationToken).ConfigureAwait(false);
         var lines = new List<string>
             {
                 VersionLine(),
@@ -95,8 +95,8 @@ public static class Doctor
 
     private static string Describe(ClientTarget target) => target.Name + " -> " + target.ConfigPath;
 
-    private static string? Discovered() =>
-        WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
+    private static Task<string?> DiscoveredAsync(CancellationToken cancellationToken) =>
+        WorkspaceSetting.DefaultAsync(Directory.GetCurrentDirectory(), cancellationToken);
 
     private static string Check(string name, string detail, bool ok, string remedy) =>
         ok
@@ -236,7 +236,7 @@ public static class Doctor
 
     private static async Task<string[]> WorkspaceLinesAsync(string? workspace, CancellationToken cancellationToken)
     {
-        var target = workspace ?? Discovered();
+        var target = workspace ?? await DiscoveredAsync(cancellationToken).ConfigureAwait(false);
 
         if (target is null)
             return [Check("workspace", "none discovered", false, "run terse from a directory containing a .sln or .csproj")];

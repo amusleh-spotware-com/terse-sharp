@@ -27,7 +27,8 @@ public enum TerseErrorCode
     RunNotFound,
     Incomplete,
     SdkNotFound,
-    ToolchainMismatch
+    ToolchainMismatch,
+    InsufficientMemory
 }
 
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)

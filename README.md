@@ -190,6 +190,8 @@ the consumer you broke elsewhere in the solution.
   `dotnet build` on C#, and hands the agent the exact TerseSharp call to make instead.
 - **Folder rules.** Nested `CLAUDE.md` files reach the agent the first time it touches that folder.
 - **Read-only mode.** `terse serve --read-only` makes every write refuse.
+- **The right solution.** With several in one folder, the one named for your OS loads first
+  (`App.sln` over `App.Mac.slnx` on Windows); `.terse.json` `workspace.path` pins it per OS.
 - **A smaller surface.** A solution with no XAML, Razor or `.resx` advertises **55 tools, ≤25,700 tokens**.
   The full list stays under a **31,100-token ceiling**, checked on every push. `--tools core` narrows
   it further, and `.terse.json` can hide any group or tool.
@@ -202,7 +204,7 @@ and friends. It blocks shell text tools (`grep`, `cat`, `sed`, `ls`…) inside a
 `dotnet build`, `test`, `format`, `clean` and `list package`, a bare `sleep`, and `git status`, `diff`,
 `log`, `ls-files`, tag listings and `ls-remote --tags`. Each denial names the replacing call with your own
 arguments filled in, and the `ToolSearch select:` string that loads its schema. A compound command keeps running with only the replaced part removed, when that
-is provably safe. `dotnet restore`/`pack`/`publish`/`run`, `git blame` and every git command that
+is provably safe, and its output opens with a stderr line naming what was removed. `dotnet restore`/`pack`/`publish`/`run`, `git blame` and every git command that
 changes history still run. `terse uninstall` removes it, and `TERSE_GUARD_LOG=<path>` logs each
 decision.
 </details>

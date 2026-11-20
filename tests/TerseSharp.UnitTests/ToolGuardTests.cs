@@ -1398,7 +1398,10 @@ public sealed class ToolGuardTests
 
         var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
 
-        Assert.Equal("git branch -a; git remote -v", hook["updatedInput"]!["command"]!.GetValue<string>());
+        var command = hook["updatedInput"]!["command"]!.GetValue<string>();
+
+        Assert.EndsWith("' >&2\ngit branch -a; git remote -v", command, StringComparison.Ordinal);
+        Assert.StartsWith("printf '%s\\n' 'terse guard: part of this command was removed and did NOT run - call instead: history", command, StringComparison.Ordinal);
         Assert.False(hook.ContainsKey("permissionDecision"));
         Assert.Contains("history", hook["additionalContext"]!.GetValue<string>(), StringComparison.Ordinal);
     }
@@ -2645,7 +2648,7 @@ public sealed class ToolGuardTests
 
         var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
 
-        Assert.Equal("git add x && git commit -m y", hook["updatedInput"]!["command"]!.GetValue<string>());
+        Assert.EndsWith("' >&2\ngit add x && git commit -m y", hook["updatedInput"]!["command"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.False(hook.ContainsKey("permissionDecision"));
         Assert.Contains("history maxResults=1", hook["additionalContext"]!.GetValue<string>(), StringComparison.Ordinal);
     }

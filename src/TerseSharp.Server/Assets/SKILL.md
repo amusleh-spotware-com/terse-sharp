@@ -36,7 +36,7 @@ this table once.
 | **Navigate** | a type wider than the 40-member cap | `get_file_outline(path)` — answers the grouped member NAMES per accessibility, which is what `contains=` (members, fields and constants alike) or a `symbolIds=` batch is chosen from |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text — and a verbose whole-file read prices itself against the outline it skipped |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId, verbose: true)` on a **type** id — the default answers its member outline |
-| **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` |
+| **Navigate** | `Read` to see one method | `get_symbol_source(symbolId, path)` - with its file, a member reads from syntax and realizes no compilation |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` |
 | **Navigate** | one `get_type_outline` call per type | `get_type_outline(symbolIds: [...])` |
 | **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` · `inherited: true` adds base classes |
@@ -227,7 +227,7 @@ check, so never shell out for them - and **`cleanup verify=true fix=ci` is both 
 **POLLING BY TOOL is the same breach**: `TaskOutput`/`TaskList` for a result the harness delivers itself is waste; check after a notification, never wait on one.
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
-rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
+rest and lets them RUN, naming what it removed (on stderr too) — call the tools for those, do NOT re-run the batch. It
 rewrites only sound shapes: uniform `;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `&&` (each link gated on the last), `||`, a background `&`, a subshell, a substitution, a comment, an unquoted backslash escape or a shell keyword is **denied
 whole** — `NO part of the command ran`; `Call this instead:` names each denied segment's call
 **and** every unreplaced one, `&&`-chained when sound, else one by one, plus the construct and its offset.
@@ -310,18 +310,9 @@ text, file and git tools already answer. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net11.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
 `targetFramework=`; an outline names members an inactive `#if` hides. `WARNING subset` names a sibling solution with projects this one lacks (`find_usages` adds `NOTE incomplete`); `load_workspace replace=true` swaps to it. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its warnaserror and nowarn severities are re-read at that configuration.
-Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
-really does come back; it costs about a second, so the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process.
+Unloading ends with a compacting collection (about a second; skipped by the locked-output retry, and - `the workspace was NOT unloaded` - when every named holder is another live process). A second load that would exhaust memory answers `ERROR InsufficientMemory`: unload first. Auto-discovery prefers the solution named for the host OS (`App.sln` over `App.Mac.slnx` on Windows); `.terse.json` `{"workspace":{"path":"App.sln"}}`, or one path per `windows`/`macos`/`linux`, overrides it.
 
-**The analyzers a solution builds from source
-no longer block your own build**: every analyzer and source-generator assembly is loaded from a
-shadow copy under a user-private `terse-analyzers/` cache, so the file in the project's `bin/` is never mapped and an
-external `dotnet build` succeeds while the workspace is loaded. The response still carries a `WARNING`
-listing any assembly that *did* end up mapped — that is a regression detector, and if you ever see it,
-restarting the server is the only way to release those files. One consequence to know: an analyzer or
-generator **rebuilt while the server is running is still served from the copy loaded first**, because
-the .NET default load context cannot replace an assembly identity in place — restart the server after
-rebuilding an analyzer whose behaviour you need to see.
+**Analyzers and generators load from a shadow copy** (`terse-analyzers/`), so an external `dotnet build` succeeds while the workspace is loaded; a `WARNING` naming an assembly that *did* get mapped means restart the server. One **rebuilt while the server runs is still served from the first copy** - restart to see it.
 `load_workspace`'s last line reports freshness —
 `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor / Files), how many paths are
@@ -433,12 +424,12 @@ answering `0 diagnostics` can no longer mean "the rule never ran". `ids=` also r
 a locked output, so an analyze after a build no longer answers `no document under that scope was
 modified`; the end-of-task gate over a task's touched files is **one** call, not one per file. With no `baseRef=`, `changed=true` is `baseRef=HEAD` on a git tree: findings - never errors - on lines this task did not change fold into one `pre-existing` count, and `baseRef=""` lists them.
 `sinceLast=true` reports only what appeared since the previous run of the same scope, plus what was
-fixed. `cleanup` never rewrites generated code, and `clean` is not covered by `undo_last_change`.
+fixed. `format`, `cleanup` and `gate` never rewrite generated code, even named by path (`add_member` inserts there verbatim), and `clean` is not covered by `undo_last_change`.
 `gate` answers **one verdict line** - `clean` or `FAILED` - and, when it is not clean, each step's
 own line plus the diagnostics that are still unfixed; never a diff. **`analyzed=N` on that line counts
 the documents the gate had in scope, not the diagnostics it found**, so `analyzed=0` cannot happen and a
 clean verdict is never a gate that ran over nothing; a scope matching no document answers an `ERROR`
-naming it instead of a verdict. It condenses to that single line
+naming it instead of a verdict, and a non-C# path (`.resx`, `.xaml`) is skipped naming its validator. It condenses to that single line
 only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
 file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
 `FAILED`, which is what a pre-push check is for. Under `baseRef=` it writes only files the tree changed. **Its default is `baseRef=HEAD`** on a git tree, `path=`/`paths=` included, ending `preExisting=N`; `baseRef=""` or `solution=true` gates whole files. `paths=[...]` gates several scopes as ONE verdict. `dryRun=true` makes both write steps verify instead of write, so
@@ -491,7 +482,7 @@ value that is not a round-trip UTC timestamp is refused by name. A `retryWith` t
 workspace AND the tool that issued it, so a `replace_symbol` token replayed through `add_member` is
 not recognised. With `toPath=`, `place=prepend` puts the moved section at the top of the target.
 
-**A write is visible to THIS workspace's next call with no reload** - but another loaded workspace
+**Writes run one at a time, so concurrent edits both land. A write is visible to THIS workspace's next call with no reload** - but another loaded workspace
 over the same root, and another terse process, pick it up through their own watcher, so their next
 call may still answer from the pre-write snapshot. The compile gate reads the workspace as it is NOW,
 so two new interdependent `.cs` files land in either order.
@@ -716,7 +707,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
 
 5. **Every edit reports its diagnostics.** Each `dryRun` carries
    `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents (an applied edit
-   leads with the delta: `errors=+0 (N in scope)`), and
+   leads with the delta: `errors=+0 (N in scope)`, then `errors in scope: <file> N, ...`), and
    `info=N introduced` for an info-severity **compiler** diagnostic, named under `verbose=true`.
    Analyzers are NOT run on an edit, so a `CA`/`IDE` rule still needs `analyze`. A `dryRun` that *would* be rolled back says
    `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
@@ -761,10 +752,8 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    too, and nothing is named when a caller cannot be proven.
    **When every new error is a missing implementation (`CS0535`/`CS0534`) the remedy names the types
    that owe it** — `the new member is declared in no implementation: Fixture.Trading.NullOrderRepository`
-   — and the sanctioned sequence, which is the one shape that works when the member cannot exist on
-   both sides at once: retry with `allowErrors=true` and the token to land the interface or abstract
-   declaration, then one `add_member` per named type. The tree does not compile between those calls,
-   so make them the next ones.
+   — then: retry with `allowErrors=true` and the token, then one `add_member` per named type, next.
+   **A `CS0117`/`CS1061` member no file declares yet** is named with the one call that lands both: `edits=`, `files=` or `add=`.
    **A token belongs to the workspace it was rejected in, and to the tool that issued it**: replaying
    it against another workspace - a sibling worktree where the same symbol id resolves - is refused
    naming both roots, instead of landing the held declaration in the wrong tree, and replaying it with

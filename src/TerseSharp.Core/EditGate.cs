@@ -132,9 +132,11 @@ public static class EditGate
             response.Note(restore);
     }
 
-    private static string Describe(GateReport report, bool verbose) => verbose
-        ? ResponseCompression.VerboseCounters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta)
-        : ResponseCompression.Counters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta);
+    private static string Describe(GateReport report, bool verbose) => ErrorSites.Joined(
+        verbose
+            ? ResponseCompression.VerboseCounters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta)
+            : ResponseCompression.Counters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta),
+        report.ErrorSites);
 
     private static async Task<DocumentDiff[]> DiffAsync(
         Solution before,
@@ -186,12 +188,14 @@ public static class EditGate
                 await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
                 Collided(regressions, options.Usings),
                 ImplementerHint(regressions),
-                FieldHint(regressions)),
+                FieldHint(regressions),
+                UndeclaredMembers.Hint(regressions)),
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. pending.Take(10)],
             RestoreHint(after, changed, root, regressions),
-            narrowed is not null && narrowed.Length < dependents.Length);
+            narrowed is not null && narrowed.Length < dependents.Length,
+            ErrorSites.Describe(current.Errors, regressions.Length));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -312,7 +316,8 @@ public static class EditGate
         string[] NewInfos,
         string[] Pending,
         string? Restore = null,
-        bool Narrowed = false);
+        bool Narrowed = false,
+        string? ErrorSites = null);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -700,6 +705,9 @@ public static class EditGate
 
         if (hints.Fields is { Count: > 0 } fields)
             response.Note(Errors.Unassigned(fields, tool));
+
+        if (hints.Undeclared is { Count: > 0 } members)
+            response.Note(UndeclaredMembers.Remedy(members, tool));
     }
 
     private static bool IsUnusedField(string key) =>

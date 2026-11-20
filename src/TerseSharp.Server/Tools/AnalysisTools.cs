@@ -196,7 +196,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
     }
 
     [McpServerTool(Name = "gate")]
-    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. paths= gates several files, directories or globs as ONE verdict. Replaces one call per scope. baseRef=HEAD keeps only the findings on lines this working tree changed against that ref and fixes only those lines, which makes the verdict mean this task rather than this repository; with no baseRef it is HEAD on a git tree for path=, paths= and the changed-file default alike, baseRef=\"\" or solution=true gates whole files, and a narrowed verdict ends preExisting=N counting what it folded. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
+    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict; a .resx, .xaml or other non-C# file is skipped, naming the validator that checks it. paths= gates several files, directories or globs as ONE verdict. Replaces one call per scope. baseRef=HEAD keeps only the findings on lines this working tree changed against that ref and fixes only those lines, which makes the verdict mean this task rather than this repository; with no baseRef it is HEAD on a git tree for path=, paths= and the changed-file default alike, baseRef=\"\" or solution=true gates whole files, and a narrowed verdict ends preExisting=N counting what it folded. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
     public Task<string> Gate(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
             [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
@@ -215,7 +215,12 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                 !dryRun || NarrowedByGit(baseRef, GitDefaulted(path, paths, solution)),
                 () => Guarded(workspace, path ?? FirstScope(paths), async Task<Result<string>> (loaded) =>
                 {
-                    var (Scope, Refusal) = GateScope(loaded, path, paths);
+                    var targets = GateSkips.Split(loaded, path, paths);
+
+                    if (targets.Empty)
+                        return Result.Ok(GateSkips.Answer(targets.Skipped));
+
+                    var (Scope, Refusal) = GateScope(loaded, targets.Path, targets.Paths);
 
                     if (Refusal is { } refused)
                         return Result.Fail<string>(refused);
@@ -225,10 +230,12 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
 
                     return Error is { } failure
                         ? Result.Fail<string>(failure)
-                        : await GateService.RunAsync(
-                            loaded,
-                        new GateRequest(Scope, Changed: changedScope, dryRun, verbose, Touched),
-                        cancellationToken).ConfigureAwait(false);
+                        : GateSkips.Appended(
+                            await GateService.RunAsync(
+                                loaded,
+                                new GateRequest(Scope, Changed: changedScope, dryRun, verbose, Touched),
+                                cancellationToken).ConfigureAwait(false),
+                            targets.Skipped);
                 }),
                 cancellationToken);
 

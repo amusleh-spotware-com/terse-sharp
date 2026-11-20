@@ -26,12 +26,16 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
                 if (discover)
                     return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
 
-                var resolved = Target(path);
+                var resolved = await TargetAsync(path, cancellationToken).ConfigureAwait(false);
 
                 if (resolved.Error is { } error)
                     return error.Render();
 
                 var target = resolved.Value!;
+
+                if (!reload && await LoadAdmission.RefusalAsync(context.Registry, target, cancellationToken).ConfigureAwait(false) is { } refusal)
+                    return refusal;
+
                 var before = context.Served();
 
                 var result = reload
@@ -185,9 +189,6 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             loaded => Listed(loaded, filter, path, Requested(properties), cancellationToken),
             cancellationToken: cancellationToken);
 
-    private static string? Discover() =>
-        WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
-
     private static async Task<string> RenderStatusAsync(
                 LoadedWorkspace workspace,
                 bool verbose,
@@ -212,6 +213,9 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
         if (await SiblingSolutions.WarningAsync(workspace, cancellationToken).ConfigureAwait(false) is { } subset)
             response.Note(subset);
+
+        if (LingeringServers.Warning() is { } lingering)
+            response.Note(lingering);
 
         await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
         AppendMappedAnalyzers(response, workspace, verbose);
@@ -645,9 +649,9 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
     private const int MaxUnresolvedAnalyzers = 5;
 
-    private static Result<string> Target(string? path) => path switch
+    private static async Task<Result<string>> TargetAsync(string? path, CancellationToken cancellationToken) => path switch
     {
-        _ when string.IsNullOrWhiteSpace(path) => Discover() is { } found
+        _ when string.IsNullOrWhiteSpace(path) => await WorkspaceSetting.DefaultAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false) is { } found
             ? Result.Ok(found)
             : Result.Fail<string>(Errors.Invalid("no solution or project found", "pass an explicit path")),
         _ when Directory.Exists(path) => WorkspaceDiscovery.SolutionIn(path),

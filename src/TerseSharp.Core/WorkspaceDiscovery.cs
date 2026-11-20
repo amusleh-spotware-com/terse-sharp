@@ -29,10 +29,14 @@ public static class WorkspaceDiscovery
     public static bool IsSolution(string path) =>
         SolutionExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
-    private static string[] SolutionsIn(DirectoryInfo directory) =>
+    private static string[] SolutionsIn(DirectoryInfo directory) => Ranked(
         [.. SolutionExtensions
             .SelectMany(extension => directory.GetFiles("*" + extension))
-            .Select(file => file.FullName)];
+            .Select(file => file.FullName)],
+        HostSystem.Name);
+
+    public static string[] Ranked(string[] solutions, string host) =>
+        [.. solutions.OrderBy(solution => HostSystem.Rank(solution, host)).ThenBy(solution => IsWholeSolution(solution) ? 0 : 1)];
 
     public static string Discover(string root, int maxResults)
     {

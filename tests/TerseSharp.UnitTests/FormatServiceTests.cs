@@ -177,9 +177,24 @@ public sealed class FormatServiceTests
     [InlineData("#nullable enable\nusing System.Text;\nusing System;\n\nnamespace N;\n\nclass C\n{\n    Exception? E;\n}\n", "#nullable enable\nusing System;\n\nnamespace N;\n\nclass C\n{\n    Exception? E;\n}\n")]
     public async Task RemoveUnusedUsings_OfTheFilesFirstDirective_KeepsItsHeaderAndLeavesNoBlankFirstLine(string text, string expected)
     {
-        var cleaned = await FormatService.RemoveUnusedUsingsAsync(Referenced(text), TestContext.Current.CancellationToken);
+        var cleaned = await FormatService.RemoveUnusedUsingsAsync(Referenced(text), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(expected, (await cleaned.GetTextAsync(TestContext.Current.CancellationToken)).ToString());
+    }
+
+    [Fact]
+    public async Task RemoveUnusedUsings_ScopedToChangedLines_KeepsAnUnusedDirectiveOnALineTheChangeDidNotTouch()
+    {
+        const string Text = "using System.Text;\n\nnamespace N;\n\nclass C\n{\n    int M() => 2;\n}\n";
+        var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "terse-touched"));
+        var touched = TouchedLines.From("diff --git a/Cleaned.cs b/Cleaned.cs\n--- a/Cleaned.cs\n+++ b/Cleaned.cs\n@@ -7,1 +7,1 @@\n-    int M() => 1;\n+    int M() => 2;\n", [], root);
+        var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject("Cleaned", LanguageNames.CSharp).AddMetadataReference(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+        var document = project.AddDocument("Cleaned.cs", SourceText.From(Text), filePath: Path.Combine(root, "Cleaned.cs"));
+
+        var cleaned = await FormatService.RemoveUnusedUsingsAsync(document, touched, TestContext.Current.CancellationToken);
+
+        Assert.Equal(Text, (await cleaned.GetTextAsync(TestContext.Current.CancellationToken)).ToString());
     }
 
     private static Document Referenced(string text)

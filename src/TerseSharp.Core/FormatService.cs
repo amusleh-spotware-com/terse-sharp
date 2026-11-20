@@ -18,10 +18,11 @@ public static class FormatService
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var documents = Scoped(workspace, scope);
+        var scoped = Scoped(workspace, scope);
+        var documents = Handwritten(workspace, scoped);
 
         if (documents.Length is 0)
-            return scope.Touched is null ? Result.Fail<string>(Empty(scope)) : Result.Ok(Untouched);
+            return Unscoped(scope, scoped.Length);
 
         if (request.Mode is FixMode.Ci)
             return await CiAsync(workspace, documents, request, options, cancellationToken).ConfigureAwait(false);
@@ -253,10 +254,10 @@ public static class FormatService
 
     private static async Task<Document> CleanDocumentAsync(Document document, TouchedLines? touched, CancellationToken cancellationToken) =>
             touched is null
-                ? await FormatOnlyAsync(await RemoveUnusedUsingsAsync(document, cancellationToken).ConfigureAwait(false), null, cancellationToken).ConfigureAwait(false)
-                : await RemoveUnusedUsingsAsync(await FormatOnlyAsync(document, touched, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+                ? await FormatOnlyAsync(await RemoveUnusedUsingsAsync(document, null, cancellationToken).ConfigureAwait(false), null, cancellationToken).ConfigureAwait(false)
+                : await RemoveUnusedUsingsAsync(await FormatOnlyAsync(document, touched, cancellationToken).ConfigureAwait(false), touched, cancellationToken).ConfigureAwait(false);
 
-    public static async Task<Document> RemoveUnusedUsingsAsync(Document document, CancellationToken cancellationToken)
+    public static async Task<Document> RemoveUnusedUsingsAsync(Document document, TouchedLines? touched, CancellationToken cancellationToken)
     {
         var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
@@ -264,21 +265,30 @@ public static class FormatService
         if (model is null || root is null)
             return document;
 
-        var unnecessary = UnnecessaryUsings(model, root, cancellationToken);
+        var unnecessary = UnnecessaryUsings(model, root, touched, cancellationToken);
 
         return unnecessary.Length is 0
             ? document
             : document.WithSyntaxRoot(HeaderKept(root, root.RemoveNodes(unnecessary, SyntaxRemoveOptions.KeepNoTrivia)!, unnecessary));
     }
 
-    private static UsingDirectiveSyntax[] UnnecessaryUsings(SemanticModel model, SyntaxNode root, CancellationToken cancellationToken) =>
+    private static UsingDirectiveSyntax[] UnnecessaryUsings(SemanticModel model, SyntaxNode root, TouchedLines? touched, CancellationToken cancellationToken) =>
         [.. model
             .GetDiagnostics(cancellationToken: cancellationToken)
-            .Where(diagnostic => diagnostic.Id is "CS8019")
+            .Where(diagnostic => diagnostic.Id is "CS8019" && (touched is null || touched.Covers(diagnostic)))
             .Select(diagnostic => root.FindNode(diagnostic.Location.SourceSpan))
             .OfType<UsingDirectiveSyntax>()];
 
     private const string Untouched = "0 files changed - no document in scope differs from the baseRef";
+
+    private const string GeneratedOnly = "0 files changed - every document in scope is generated code, which format and cleanup never rewrite; analyze still reports on it";
+
+    private static DocumentId[] Handwritten(LoadedWorkspace workspace, DocumentId[] documents) =>
+        [.. documents.Where(id => !GeneratedCode.IsGenerated(workspace.Root, workspace.Solution.GetDocument(id)?.FilePath))];
+
+    private static Result<string> Unscoped(FixScope scope, int generated) => generated > 0
+        ? Result.Ok(GeneratedOnly)
+        : scope.Touched is null ? Result.Fail<string>(Empty(scope)) : Result.Ok(Untouched);
 
     private static DocumentId[] Scoped(LoadedWorkspace workspace, FixScope scope)
     {

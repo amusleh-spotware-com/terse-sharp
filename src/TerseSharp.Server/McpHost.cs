@@ -42,6 +42,7 @@ public static class McpHost
                 return await next(request, token).ConfigureAwait(false);
             });
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
+                filters.AddCallToolFilter(WriteSerializer.Filter);
                 filters.AddCallToolFilter(RepeatSteer.Filter());
                 filters.AddListToolsFilter(AdvertisedCost.Filter());
                 filters.AddListToolsFilter(ToolExamples.Filter());
@@ -63,7 +64,7 @@ public static class McpHost
         if (await ClientRegistrar.ProbeAsync(cancellationToken).ConfigureAwait(false) is { } assets)
             AssetBanner.Publish(assets);
 
-        Preload(host.Services, workspace, cancellationToken);
+        Preload(host.Services, workspace ?? await WorkspaceSetting.DefaultAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false), cancellationToken);
         BeginMaintenance(cancellationToken);
         BeginSweep(cancellationToken);
         BeginIdleRelease(host.Services, idleFor, cancellationToken);
@@ -115,16 +116,11 @@ public static class McpHost
 
     private static void Preload(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
     {
-        var target = workspace ?? Discovered();
-
-        if (target is null)
+        if (workspace is null)
             return;
 
-        services.GetRequiredService<ToolContext>().BeginPreload(target, cancellationToken);
+        services.GetRequiredService<ToolContext>().BeginPreload(workspace, cancellationToken);
     }
-
-    private static string? Discovered() =>
-        WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
 
     private static async Task MaintainAsync(CancellationToken cancellationToken)
     {

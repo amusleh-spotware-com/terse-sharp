@@ -68,4 +68,46 @@ public sealed class WorkspaceDiscoveryTests : IDisposable
         await File.WriteAllTextAsync(path, string.Empty, TestContext.Current.CancellationToken);
         return path;
     }
+
+    [Theory]
+    [InlineData(HostSystem.Windows, "xTrader.sln")]
+    [InlineData(HostSystem.MacOs, "xTrader.Mac.slnx")]
+    [InlineData(HostSystem.Linux, "xTrader.sln")]
+    public void Ranked_ASolutionNamedForAnotherSystem_ComesAfterTheOneTheHostCanBuild(string host, string expected)
+    {
+        var ranked = WorkspaceDiscovery.Ranked(["xTrader.Mac.slnx", "xTrader.sln"], host);
+
+        Assert.Equal(expected, ranked[0]);
+    }
+
+    [Fact]
+    public void Ranked_AFilterBesideItsSolution_ComesAfterTheWholeSolution()
+    {
+        var ranked = WorkspaceDiscovery.Ranked(["Repo.slnf", "Repo.slnx"], HostSystem.Windows);
+
+        Assert.Equal(["Repo.slnx", "Repo.slnf"], ranked);
+    }
+
+    [Fact]
+    public async Task Find_ADirectoryHoldingAMacAndAWindowsSolution_AnswersTheHostsFirst()
+    {
+        await TouchAsync("App.Mac.slnx");
+        await TouchAsync("App.Windows.slnx");
+        await TouchAsync("App.Linux.slnx");
+
+        Assert.Equal(0, HostSystem.Rank(WorkspaceDiscovery.Find(directory.FullName)[0], HostSystem.Name));
+    }
+
+    [Fact]
+    public async Task DefaultAsync_ATerseJsonNamingAPathPerSystem_AnswersTheHostsEntryOverDiscovery()
+    {
+        await TouchAsync("App.slnx");
+        var chosen = await TouchAsync("Chosen.sln");
+        await File.WriteAllTextAsync(Path.Combine(directory.FullName, ".terse.json"), "{\"workspace\":{\"path\":{\"" + HostSystem.Name + "\":\"Chosen.sln\"}}}", TestContext.Current.CancellationToken);
+
+        Assert.Equal(chosen, await WorkspaceSetting.DefaultAsync(directory.FullName, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public void Configured_APathThatDoesNotExist_IsIgnored() => Assert.Null(WorkspaceSetting.Configured("{\"workspace\":{\"path\":\"Missing.sln\"}}", directory.FullName, HostSystem.Windows));
 }

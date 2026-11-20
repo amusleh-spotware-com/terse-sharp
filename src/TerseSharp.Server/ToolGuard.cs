@@ -1114,7 +1114,7 @@ public static partial class ToolGuard
     private static JsonObject Rewriting(GuardVerdict verdict, string rewrite) => new()
     {
         ["hookEventName"] = "PreToolUse",
-        ["updatedInput"] = new JsonObject { ["command"] = rewrite },
+        ["updatedInput"] = new JsonObject { ["command"] = GuardNotice.Prefixed(rewrite, verdict.Routing) },
         ["additionalContext"] = verdict.Reason + Calling(verdict.Routing),
     };
 
