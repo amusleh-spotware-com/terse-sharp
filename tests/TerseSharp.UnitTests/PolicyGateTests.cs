@@ -406,4 +406,37 @@ public sealed class PolicyGateTests
             Directory.Delete(outside, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task WriteTextAsync_IntoALinkedWorktreeWithNoTerseJson_AppliesTheMainCheckoutsPolicy()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        var root = Path.Combine(Path.GetTempPath(), "terse-linked-" + Guid.NewGuid().ToString("N"));
+        var probe = Path.Combine(root, "wt", "src", "Loose.cs");
+        await LinkedWorktreeAsync(root, """{"policy":{"allowOverride":false,"rules":{"xmlDocs":{"action":"reject"}}}}""");
+
+        try
+        {
+            var result = await FileService.WriteTextAsync(workspace.Workspace, probe, "public static class Loose\n{\n    /// <summary>One.</summary>\n    public static int One() => 1;\n}\n", false, true, false, false, false, false, TestContext.Current.CancellationToken);
+
+            Assert.Equal(TerseErrorCode.PolicyViolation, result.Error?.Code);
+            Assert.Contains("TERSE113", result.Error!.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(probe));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task LinkedWorktreeAsync(string root, string mainPolicy)
+    {
+        var own = Path.Combine(root, "main", ".git", "worktrees", "wt");
+        Directory.CreateDirectory(own);
+        Directory.CreateDirectory(Path.Combine(root, "wt", "src"));
+        await File.WriteAllTextAsync(Path.Combine(own, "commondir"), "../..\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "wt", ".git"), "gitdir: " + own + "\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "main", TerseConfigFile.FileName), mainPolicy, TestContext.Current.CancellationToken);
+        PolicyCache.Forget();
+    }
 }

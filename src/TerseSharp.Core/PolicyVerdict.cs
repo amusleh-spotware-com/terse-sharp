@@ -34,4 +34,9 @@ public sealed record PolicyVerdict(
         foreach (var finding in dryRun && Blocks ? Rejected : [])
             yield return string.Create(CultureInfo.InvariantCulture, $"WARNING would be rolled back by policy  {finding.Explain()}");
     }
+
+    public string Prefixed(bool dryRun, string response) =>
+        Notice is null && Warned.IsEmpty && Rejected.IsEmpty
+            ? response
+            : string.Join('\n', [.. Lines(dryRun), response]);
 }

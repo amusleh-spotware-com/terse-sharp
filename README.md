@@ -150,6 +150,7 @@ off in `.terse.json`:
 
 A `policy` section in `.terse.json` checks every edit against your team's rules. It cascades like
 `.editorconfig`: your home file sets your defaults, and a project overrides only what it changes.
+A linked git worktree also inherits the main checkout's policy, so a local, untracked policy covers every worktree.
 `terse install` writes the home file for you.
 
 | Rule | Default |

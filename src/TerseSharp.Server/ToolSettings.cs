@@ -29,7 +29,7 @@ public static class ToolSettings
     {
         var overrides = ToolOverrides.None;
 
-        foreach (var path in TerseConfigFile.Chain(directory))
+        foreach (var path in await TerseConfigFile.ChainAsync(directory, cancellationToken).ConfigureAwait(false))
         {
             overrides = await ApplyAsync(overrides, path, cancellationToken).ConfigureAwait(false);
 

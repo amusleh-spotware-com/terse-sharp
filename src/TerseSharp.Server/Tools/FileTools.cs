@@ -1521,7 +1521,7 @@ context.RejectWrite() is { } rejection
 
     private Task<string> Staging(string? workspace, StageArguments arguments, WriteOptions options, CancellationToken cancellationToken) => (arguments.Path, arguments.Content, arguments.Reference, arguments.Unstageable) switch
     {
-        ({ Length: > 0 } target, { } text, null or "", false) => Guarded(workspace, target, loaded => IndexWrite.StageAsync(new StageRequest(loaded.Root, target, text, options.DryRun, options.Verbose), cancellationToken), false, cancellationToken),
+        ({ Length: > 0 } target, { } text, null or "", false) => Guarded(workspace, target, loaded => IndexWrite.StageAsync(new StageRequest(loaded.Root, target, text, options.DryRun, options.Verbose, options.AllowPolicy), cancellationToken), false, cancellationToken),
         ({ Length: > 0 } target, null, { Length: > 0 } from, false) => Guarded(workspace, target, loaded => IndexWrite.UnstageAsync(loaded.Root, target, from, cancellationToken), false, cancellationToken),
         _ => Task.FromResult(Errors.Invalid(
             "stage=true writes ONE path's content= to the index, or with ref= resets its index entry - not both, and not beside files=, delete= or retryWith=",

@@ -37,6 +37,34 @@ public sealed class StageE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WriteText_WithStageOfCSharpThePolicyRejects_IsRefusedAndLeavesTheIndexAlone()
+    {
+        await File.WriteAllTextAsync(Path.Combine(root, ".terse.json"), """{"policy":{"allowOverride":false,"rules":{"comments":{"action":"reject"}}}}""", TestContext.Current.CancellationToken);
+
+        var text = await CallAsync("write_text", new() { ["path"] = "Staged.cs", ["content"] = "public static class Staged\n{\n    public static int One()\n    {\n        // one\n        return 1;\n    }\n}\n", ["stage"] = true, ["allowPolicy"] = true });
+
+        Assert.Contains("ERROR PolicyViolation", text, StringComparison.Ordinal);
+        Assert.Contains("TERSE112", text, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, await GitAsync("ls-files", "--stage", "--", "sub/Staged.cs"));
+    }
+
+    [Fact]
+    public async Task WriteText_WithStageAllowPolicyWhereTheProjectPermitsOverriding_StagesItAndNamesTheOverride()
+    {
+        await File.WriteAllTextAsync(Path.Combine(root, ".terse.json"), """{"policy":{"allowOverride":true,"rules":{"comments":{"action":"reject"}}}}""", TestContext.Current.CancellationToken);
+        var content = "public static class Overridden\n{\n    public static int One()\n    {\n        // one\n        return 1;\n    }\n}\n";
+
+        var preview = await CallAsync("write_text", new() { ["path"] = "Overridden.cs", ["content"] = content, ["stage"] = true, ["dryRun"] = true });
+        var previewed = await GitAsync("ls-files", "--stage", "--", "sub/Overridden.cs");
+        var text = await CallAsync("write_text", new() { ["path"] = "Overridden.cs", ["content"] = content, ["stage"] = true, ["allowPolicy"] = true });
+
+        Assert.Contains("WARNING would be rolled back by policy  TERSE112", preview, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, previewed);
+        Assert.Contains("WARNING policy overridden  TERSE112", text, StringComparison.Ordinal);
+        Assert.Contains("sub/Overridden.cs", await GitAsync("ls-files", "--stage", "--", "sub/Overridden.cs"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WriteText_WithStage_WritesTheIndexEntryOfThePathInsideTheSolutionAndLeavesTheWorkingTreeAlone()
     {
         var text = await CallAsync("write_text", new() { ["path"] = "notes.txt", ["content"] = "﻿b", ["stage"] = true });

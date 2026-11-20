@@ -6,7 +6,7 @@ namespace TerseSharp.Core;
 public static class WorkspaceSetting
 {
     public static async Task<string?> DefaultAsync(string directory, CancellationToken cancellationToken) =>
-        await ConfiguredAsync(TerseConfigFile.Chain(directory), cancellationToken).ConfigureAwait(false)
+        await ConfiguredAsync(await TerseConfigFile.ChainAsync(directory, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)
             ?? (WorkspaceDiscovery.Find(directory) is [var first, ..] ? first : null);
 
     public static string? Configured(string json, string directory, string host)

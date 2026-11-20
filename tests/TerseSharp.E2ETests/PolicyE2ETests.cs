@@ -431,4 +431,31 @@ public sealed class PolicyE2ETests : IAsyncLifetime
             DeleteLooseDirectory();
         }
     }
+
+    [Fact]
+    public async Task WriteText_IntoALinkedWorktreeWithNoTerseJson_RefusesWhatTheMainCheckoutsPolicyRejects()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-linked-e2e-" + Guid.NewGuid().ToString("N"));
+        var own = Path.Combine(root, "main", ".git", "worktrees", "wt");
+        var probe = Path.Combine(root, "wt", "src", "Loose.cs");
+        Directory.CreateDirectory(own);
+        Directory.CreateDirectory(Path.GetDirectoryName(probe)!);
+        await File.WriteAllTextAsync(Path.Combine(own, "commondir"), "../..\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "wt", ".git"), "gitdir: ../main/.git/worktrees/wt\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "main", ".terse.json"), """{"policy":{"allowOverride":false,"rules":{"xmlDocs":{"action":"reject"}}}}""", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var rejected = await WrittenAsync(probe, "public static class Loose\n{\n    /// <summary>One.</summary>\n    public static int One() => 1;\n}\n", allowPolicy: true);
+
+            Assert.Contains("ERROR PolicyViolation", rejected, StringComparison.Ordinal);
+            Assert.Contains("TERSE113", rejected, StringComparison.Ordinal);
+            Assert.Contains("allowOverride=false", rejected, StringComparison.Ordinal);
+            Assert.False(File.Exists(probe));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

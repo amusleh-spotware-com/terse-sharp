@@ -210,10 +210,7 @@ public static class FileService
         return !dryRun && verdict.Blocks ? Result.Fail<PolicyVerdict>(Errors.PolicyViolation(verdict)) : Result.Ok(verdict);
     }
 
-    private static string Policed(PolicyVerdict verdict, bool dryRun, string response) =>
-        verdict is { Notice: null, Warned.IsEmpty: true, Rejected.IsEmpty: true }
-            ? response
-            : string.Join('\n', [.. verdict.Lines(dryRun), response]);
+    private static string Policed(PolicyVerdict verdict, bool dryRun, string response) => verdict.Prefixed(dryRun, response);
 
     private static PolicySource[] Unpoliced(List<(string Path, Result<BatchEdit> Rewrite)> rewrites, List<PendingWrite> gated) =>
             [.. rewrites

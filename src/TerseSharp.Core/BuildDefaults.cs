@@ -12,7 +12,7 @@ public sealed record BuildDefaults(string? Configuration, FrozenDictionary<strin
     {
         var defaults = None;
 
-        foreach (var path in TerseConfigFile.Chain(directory))
+        foreach (var path in await TerseConfigFile.ChainAsync(directory, cancellationToken).ConfigureAwait(false))
             defaults = await MergedAsync(defaults, path, cancellationToken).ConfigureAwait(false);
 
         return defaults;

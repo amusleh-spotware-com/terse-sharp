@@ -9,7 +9,7 @@ public static class PolicyCache
 
     public static async Task<PolicyOptions> ForAsync(string root, CancellationToken cancellationToken)
     {
-        var chain = TerseConfigFile.Chain(root);
+        var chain = await TerseConfigFile.PolicyChainAsync(root, cancellationToken).ConfigureAwait(false);
         var key = Key(chain);
 
         if (Entries.TryGetValue(root, out var cached) && cached.Matches(key))

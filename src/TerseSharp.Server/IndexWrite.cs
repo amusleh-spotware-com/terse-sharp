@@ -2,7 +2,7 @@ using System.Text;
 
 namespace TerseSharp.Server;
 
-internal readonly record struct StageRequest(string Root, string Path, string Content, bool DryRun, bool Verbose);
+internal readonly record struct StageRequest(string Root, string Path, string Content, bool DryRun, bool Verbose, bool AllowPolicy = false);
 
 internal static class IndexWrite
 {
@@ -15,17 +15,27 @@ internal static class IndexWrite
         if (Relative(request.Root, request.Path) is not { } relative)
             return Errors.OutOfWorkspace(request.Path).Render();
 
-        var indexed = await GitRunner.ShowAsync(request.Root, string.Empty, relative, cancellationToken).ConfigureAwait(false);
-        var before = indexed.IsOk ? indexed.Value! : string.Empty;
+        var before = await IndexedAsync(request.Root, relative, cancellationToken).ConfigureAwait(false);
+        var policy = await PolicyAsync(request, relative, before, cancellationToken).ConfigureAwait(false);
 
         if (request.DryRun)
-            return "dryRun stage  " + relative + "  changedLines=" + Changed(before, request.Content) + "\n" + UnifiedDiff.Between(relative, before, request.Content);
+            return policy.Prefixed(true, "dryRun stage  " + relative + "  changedLines=" + Changed(before, request.Content) + "\n" + UnifiedDiff.Between(relative, before, request.Content));
+
+        if (policy.Blocks)
+            return Errors.PolicyViolation(policy).Render();
 
         var staged = await ApplyAsync(request.Root, relative, request.Content, cancellationToken).ConfigureAwait(false);
 
         return !staged.IsOk
             ? staged.Error!.Render()
-            : "staged  " + relative + "  changedLines=" + Changed(before, request.Content) + "  working tree untouched" + (request.Verbose ? "\n" + UnifiedDiff.Between(relative, before, request.Content) : string.Empty);
+            : policy.Prefixed(false, "staged  " + relative + "  changedLines=" + Changed(before, request.Content) + "  working tree untouched" + (request.Verbose ? "\n" + UnifiedDiff.Between(relative, before, request.Content) : string.Empty));
+    }
+
+    private static async Task<string> IndexedAsync(string root, string relative, CancellationToken cancellationToken)
+    {
+        var indexed = await GitRunner.ShowAsync(root, string.Empty, relative, cancellationToken).ConfigureAwait(false);
+
+        return indexed.IsOk ? indexed.Value! : string.Empty;
     }
 
     public static async Task<string> UnstageAsync(string root, string path, string reference, CancellationToken cancellationToken)
@@ -92,4 +102,7 @@ internal static class IndexWrite
 
     private static string Changed(string before, string after) =>
         UnifiedDiff.ChangedLines(before, after).ToString(CultureInfo.InvariantCulture);
+
+    private static Task<PolicyVerdict> PolicyAsync(StageRequest request, string relative, string before, CancellationToken cancellationToken) =>
+            TextPolicyGate.EvaluateAsync(request.Root, [new PolicySource(Path.GetFullPath(Path.Combine(request.Root, relative)), before, request.Content)], request.AllowPolicy, cancellationToken);
 }

@@ -7,8 +7,8 @@ namespace TerseSharp.Core;
 
 public static class PolicySettings
 {
-    public static Task<PolicyOptions> LoadAsync(string directory, CancellationToken cancellationToken) =>
-        LoadAsync(TerseConfigFile.Chain(directory), cancellationToken);
+    public static async Task<PolicyOptions> LoadAsync(string directory, CancellationToken cancellationToken) =>
+        await LoadAsync(await TerseConfigFile.PolicyChainAsync(directory, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
 
     public static PolicyOptions Parse(string json) => Parse(json, PolicyOptions.Off);
 

@@ -848,7 +848,7 @@ never a reason to fall back to `Read` or `Grep`.
 
 To narrow it deliberately, `write_text` a `.terse.json` at the repo root. Every one from the user's
 home (`$TERSE_HOME`, else the user profile) down to the server's directory is read, NEARER wins per
-setting like `.editorconfig`, and the walk never climbs above the repository root:
+setting like `.editorconfig`; the walk stops at the repository root, and a linked worktree inherits its main checkout's `policy` below its own:
 
 ```json
 {

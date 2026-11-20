@@ -95,7 +95,7 @@ complexity (`TERSE100`), statements per method, methods per type, constructor de
 method name length, meaningless suffixes, naming, `async void`, condition operands, chained references,
 nesting depth (default 3), comments (`TERSE112`), XML doc comments (`TERSE113`) and code health
 (`TERSE114`). Each is `reject`, `warn` or `off`, every rule that is on by default warns, and only what an edit
-**introduces** counts. The rules hold on every C# write, `force=true` and `allowErrors=true` included. The file cascades like `.editorconfig`, and `terse install` writes your home copy.
+**introduces** counts. The rules hold on every C# write, `force=true` and `allowErrors=true` included. The file cascades like `.editorconfig`, a linked git worktree inherits the main checkout's policy, and `terse install` writes your home copy.
 
 **One call for the whole quality gate.** `gate` runs `analyze` → `format` → `cleanup` → `analyze` on
 the files you changed and answers one line. `cleanup verify=true fix=ci` checks both CI format commands

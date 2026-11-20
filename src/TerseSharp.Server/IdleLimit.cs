@@ -12,7 +12,7 @@ public static class IdleLimit
     public const string Setting = ".terse.json workspace.idleMinutes";
 
     public static async Task<TimeSpan> ResolveAsync(int? option, string directory, CancellationToken cancellationToken) =>
-        Resolve(option, Environment.GetEnvironmentVariable(Variable), await ConfiguredAsync(TerseConfigFile.Chain(directory), cancellationToken).ConfigureAwait(false));
+        Resolve(option, Environment.GetEnvironmentVariable(Variable), await ConfiguredAsync(await TerseConfigFile.ChainAsync(directory, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false));
 
     public static TimeSpan Resolve(int? option, string? environment, int? configured = null) =>
         Minutes(option ?? Parse(environment) ?? configured ?? DefaultMinutes);
