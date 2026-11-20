@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -16,18 +17,22 @@ public static class EditGate
         EditOptions options,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, !options.AllowErrors, cancellationToken).ConfigureAwait(false);
         var invisible = await InvisiblePayload.NoteAsync(workspace.Solution, adopted, changed, workspace.Root, cancellationToken).ConfigureAwait(false);
+        var diffed = Stopwatch.GetTimestamp();
 
         var report = options.AllowErrors
             ? null
             : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, options, cancellationToken).ConfigureAwait(false);
+        var analysed = Stopwatch.GetTimestamp();
 
         var policy = await PolicyGate.EvaluateAsync(workspace, adopted, changed, options.AllowPolicy, cancellationToken).ConfigureAwait(false);
+        var policed = Stopwatch.GetTimestamp();
 
         if (options.DryRun)
-            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root, policy, invisible));
+            return Result.Ok(GateTiming.Since(started, diffed, analysed, policed, report?.Timing ?? default).Appended(Render(options, diff, "dryRun", report, workspace.Root, policy, invisible), GateTiming.SlowAfter));
 
         if (Blocked(report, policy, options.Tool) is { } failure)
             return Result.Fail<string>(failure);
@@ -38,7 +43,9 @@ public static class EditGate
         foreach (var written in diff)
             EditPulse.Bump(written.Path);
 
-        return Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy, invisible));
+        var timing = GateTiming.Since(started, diffed, analysed, policed, report?.Timing ?? default);
+
+        return Result.Ok(timing.Appended(Render(options, diff, "applied", report, workspace.Root, policy, invisible), GateTiming.SlowAfter));
     }
 
     private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root, PolicyVerdict policy, string? invisible)
@@ -166,15 +173,32 @@ public static class EditGate
                 EditOptions options,
                 CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var dependents = Affected(before, changed);
         var narrowed = await NarrowedAsync(before, after, changed, cancellationToken).ConfigureAwait(false);
         var projects = narrowed ?? dependents;
+        var shaped = Stopwatch.GetTimestamp();
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
+        var realized = Stopwatch.GetTimestamp();
         var current = await TallyAsync(after, projects, root, cancellationToken).ConfigureAwait(false);
+        var compiled = Stopwatch.GetTimestamp();
         var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
         var arrived = Arrived(before, after, changed, root);
         var pending = await PendingAsync(before, after, changed, options.Tool, appeared, cancellationToken).ConfigureAwait(false);
         var regressions = appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors) && Array.IndexOf(pending, key) < 0).Take(10).ToArray();
+        var hints = new RollbackHints(
+            await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
+            await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
+            Collided(regressions, options.Usings),
+            ImplementerHint(regressions),
+            FieldHint(regressions),
+            UndeclaredMembers.Hint(regressions));
+        var timing = new AnalysisTiming(
+            Stopwatch.GetElapsedTime(started, shaped),
+            Stopwatch.GetElapsedTime(shaped, realized),
+            Stopwatch.GetElapsedTime(realized, compiled),
+            Stopwatch.GetElapsedTime(compiled),
+            new GateScope(narrowed is not null, projects.Length));
 
         return new GateReport(
             regressions,
@@ -183,19 +207,14 @@ public static class EditGate
             current.ErrorCount - baseline.ErrorCount,
             current.WarningCount,
             current.WarningCount - baseline.WarningCount,
-            new RollbackHints(
-                await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
-                await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
-                Collided(regressions, options.Usings),
-                ImplementerHint(regressions),
-                FieldHint(regressions),
-                UndeclaredMembers.Hint(regressions)),
+            hints,
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. pending.Take(10)],
             RestoreHint(after, changed, root, regressions),
             narrowed is not null && narrowed.Length < dependents.Length,
-            ErrorSites.Describe(current.Errors, regressions.Length));
+            ErrorSites.Describe(current.Errors, regressions.Length),
+            timing);
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -317,7 +336,8 @@ public static class EditGate
         string[] Pending,
         string? Restore = null,
         bool Narrowed = false,
-        string? ErrorSites = null);
+        string? ErrorSites = null,
+        AnalysisTiming Timing = default);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,

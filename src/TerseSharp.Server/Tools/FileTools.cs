@@ -218,7 +218,7 @@ bool verbose) =>
                     () => FileService.WriteTextAsync(
                         loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
                     cancellationToken).ConfigureAwait(false),
-                new EditTools.Carry("write_text", [path], [content], Usings: usings),
+                new EditTools.Carry("write_text", [path], [content], Usings: usings, Forced: [options.Force], Overwrite: options.Overwrite),
                 loaded.Root), cancellationToken: cancellationToken);
     }
 
@@ -921,7 +921,7 @@ context.RejectWrite() is { } rejection
                             () => FileService.WriteTextManyAsync(
                                 loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
                             cancellationToken).ConfigureAwait(false),
-                        new EditTools.Carry("write_text", Array.ConvertAll(files, file => file.Path), Array.ConvertAll(files, file => file.Content), Usings: usings is null ? null : [.. usings]),
+                        new EditTools.Carry("write_text", Array.ConvertAll(files, file => file.Path), Array.ConvertAll(files, file => file.Content), Usings: usings is null ? null : [.. usings], Forced: Array.ConvertAll(files, file => options.Force || file.Force), Overwrite: options.Overwrite),
                         loaded.Root)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
@@ -1409,7 +1409,7 @@ context.RejectWrite() is { } rejection
 
     private static string Previewed(bool dryRun, Result<string> result, EditTools.Carry carry, string root) =>
         dryRun && Landing(result) is { } preview && carry.Payloads is { Length: > 0 } payloads
-            ? preview + "\nretryWith=" + RejectedEdits.Remember(root, "write_text", carry.Targets ?? [], payloads) + " applies this preview"
+            ? preview + "\nretryWith=" + RejectedEdits.Remember(root, "write_text", carry.Targets ?? [], payloads, forced: carry.Forced, overwrite: carry.Overwrite) + " applies this preview"
             : EditTools.Carried(result, carry, root);
 
     private static string? Landing(Result<string> result) => result is { IsOk: true, Value: { } preview } && Lands(preview) ? preview : null;
@@ -1430,7 +1430,8 @@ context.RejectWrite() is { } rejection
         for (var index = 0; index < files.Length; index++)
         {
             var target = held.Targets[index];
-            files[index] = new FileService.FileWrite(target, SourceFile.IsCSharp(target) ? WriteRetry.WithUsings(held.Payloads[index], usings) : held.Payloads[index]);
+            var content = SourceFile.IsCSharp(target) ? WriteRetry.WithUsings(held.Payloads[index], usings) : held.Payloads[index];
+            files[index] = new FileService.FileWrite(target, content, held.Forced is { } forced && index < forced.Count && forced[index]);
         }
 
         return files;
@@ -1440,23 +1441,24 @@ context.RejectWrite() is { } rejection
     {
         var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
         var content = WriteRetry.WithUsings(supplied is { Length: > 0 } ? supplied : Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
+        var replay = options with { Force = options.Force || (path is not { Length: > 0 } && held.Forced is [true, ..]), Overwrite = options.Overwrite || held.Overwrite };
 
         if (target.Length is 0)
             return Task.FromResult(Errors.Blank("path").Render());
 
         return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
-            ?? (Raced(loaded, [target], options.IfUnchangedSince) is { } raced
+            ?? (Raced(loaded, [target], replay.IfUnchangedSince) is { } raced
                 ? await raced.ConfigureAwait(false)
                 : Previewed(
-                    options.DryRun,
+                    replay.DryRun,
                     await LandedWrites.GuardedAsync(
                         loaded.Root,
                         [new FileService.FileWrite(target, content)],
-                        options.DryRun,
+                        replay.DryRun,
                         () => FileService.WriteTextAsync(
-                            loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                            loaded, target, content, replay.DryRun, replay.Force, replay.AllowErrors, replay.Verbose, replay.AllowPolicy, replay.Overwrite, cancellationToken),
                         cancellationToken).ConfigureAwait(false),
-                    new EditTools.Carry("write_text", [target], [content], Usings: usings),
+                    new EditTools.Carry("write_text", [target], [content], Usings: usings, Forced: [replay.Force], Overwrite: replay.Overwrite),
                     loaded.Root)),
             cancellationToken: cancellationToken);
     }
@@ -1514,7 +1516,7 @@ context.RejectWrite() is { } rejection
 
         var imports = usings is { Length: > 0 } ? usings : held.Usings;
 
-        return WrittenMany(workspace, null, null, false, false, Replays(held, imports), options, held.Root, imports, cancellationToken);
+        return WrittenMany(workspace, null, null, false, false, Replays(held, imports), options with { Overwrite = options.Overwrite || held.Overwrite }, held.Root, imports, cancellationToken);
     }
 
     private readonly record struct StageArguments(string? Path, string? Content, string? Reference, bool Unstageable);

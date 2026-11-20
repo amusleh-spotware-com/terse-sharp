@@ -29,6 +29,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
                 return existing.Load;
             }
 
+            var eviction = existing is null ? evictions.Recalled(full) : null;
             var loaded = await AddAsync(
                 Key(existing, full),
                 WorkspaceSeed.Fresh(watch, targetFramework),
@@ -36,7 +37,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
             existing?.Dispose();
 
-            return loaded.Load;
+            return eviction is null ? loaded.Load : loaded.Load with { Eviction = eviction };
         }
         finally
         {
@@ -175,7 +176,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             return carriedEpochs.Remove(full, out var epoch) ? epoch : null;
     }
 
-    private static void Reclaim()
+    internal static void Reclaim()
     {
         GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
@@ -187,6 +188,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         lock (map)
         {
             workspaces[full] = loaded;
+            evictions.Forget(full);
 
             var evicted = new List<LoadedWorkspace>();
 
@@ -196,6 +198,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
                 workspaces.Remove(oldest.Key);
                 evicted.Add(oldest.Value);
+                evictions.Remember(oldest.Key, full, maxWorkspaces, DateTimeOffset.UtcNow);
             }
 
             return [.. evicted];
@@ -524,6 +527,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     }
 
     private const int WorktreeTier = 3;
+    private readonly EvictionMemory evictions = new();
 
     private static LoadedWorkspace? AtWorktreeRoot(LoadedWorkspace[] tied, string hint)
     {

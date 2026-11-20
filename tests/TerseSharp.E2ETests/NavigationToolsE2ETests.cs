@@ -1386,4 +1386,19 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("resolved from name: M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindUsages_ForAnOverloadedNameWithNoParameterList_AnswersEveryOverloadUnderItsOwnLine()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "Reconciler.Reconcile" });
+        var single = await server.CallAsync("find_usages", new() { ["symbolId"] = "M:Fixture.Trading.Reconciler.Reconcile(Fixture.Trading.Order)" });
+        var impact = await server.CallAsync("find_usages", new() { ["symbolId"] = "Reconciler.Reconcile", ["impact"] = true });
+
+        Assert.DoesNotContain("AmbiguousSymbol", text, StringComparison.Ordinal);
+        Assert.Contains("3 overloads", text, StringComparison.Ordinal);
+        Assert.Equal(3, text.Split('\n').Count(line => line.StartsWith("overload Reconciler.Reconcile(", StringComparison.Ordinal)));
+        Assert.Contains("overload Reconciler.Reconcile(Order)\n" + single.Split('\n')[0], text, StringComparison.Ordinal);
+        Assert.Contains("Reconciler.cs", text, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR AmbiguousSymbol", impact, StringComparison.Ordinal);
+    }
 }

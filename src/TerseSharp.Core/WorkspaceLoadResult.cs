@@ -11,7 +11,8 @@ public sealed record WorkspaceLoadResult(
     UnresolvedAnalyzers? Analyzers = null,
     IReadOnlyList<string>? ConfigurationMismatches = null,
     IReadOnlyList<SeverityRemap>? SeverityRemaps = null,
-    IReadOnlyList<string>? RestoreMissing = null)
+    IReadOnlyList<string>? RestoreMissing = null,
+    WorkspaceEviction? Eviction = null)
 {
     public UnresolvedAnalyzers Unresolved => Analyzers ?? UnresolvedAnalyzers.None;
 

@@ -859,7 +859,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return listing.Timing == default ? text : (listing.Timing with { Stamp = stamped }).Appended(text, listings.SlowAfter);
     }
 
-    private static async Task<GitStamp> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)
+    internal static async Task<GitStamp> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)
     {
         var sync = loaded.Sync;
 
@@ -1322,5 +1322,5 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return null;
     }
 
-    private readonly record struct GitStamp(string? Value, string? Unavailable);
+    internal readonly record struct GitStamp(string? Value, string? Unavailable);
 }

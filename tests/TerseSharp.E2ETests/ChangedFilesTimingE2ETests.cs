@@ -39,4 +39,15 @@ public sealed class ChangedFilesTimingE2ETests : IAsyncLifetime
 
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task SearchTextAndSearchRegex_OverTheSlowThreshold_EndWithOneTimingLineNamingTheIndexAndScanPhases()
+    {
+        var literal = await CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs" });
+        var expression = await CallAsync("search_regex", new() { ["query"] = "class \\w+Service", ["glob"] = "src/**/*.cs" });
+
+        Assert.Contains("OrderService", literal, StringComparison.Ordinal);
+        Assert.Matches(@"^timing index=\d+ scan=\d+ files=[1-9]\d*$", Assert.Single(literal.Split('\n'), line => line.StartsWith("timing ", StringComparison.Ordinal)));
+        Assert.Matches(@"^timing index=\d+ scan=\d+ files=[1-9]\d*$", Assert.Single(expression.Split('\n'), line => line.StartsWith("timing ", StringComparison.Ordinal)));
+    }
 }

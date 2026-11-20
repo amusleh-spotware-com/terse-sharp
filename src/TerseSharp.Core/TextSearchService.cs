@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -30,15 +31,17 @@ public static class TextSearchService
         TextSearchRequest request,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var selected = request.Globs.IsDefaultOrEmpty
             ? Matched(workspace, request.Glob)
             : Selected(Matched(workspace, "**"), workspace.Root, request.Globs.AsSpan());
         var files = Kept([.. selected.Where(IsSearchableFile)], request.Exclude);
 
-        return await ScannedAsync(files, request, cancellationToken).ConfigureAwait(false);
+        return await ScannedAsync(files, request, started, cancellationToken).ConfigureAwait(false);
     }
     public static async Task<string> SearchOutsideAsync(TextSearchRequest request, CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var root = request.Root ?? string.Empty;
         var candidates = Outside(root, request.Globs.IsDefaultOrEmpty ? request.Glob : "**");
 
@@ -49,13 +52,15 @@ public static class TextSearchService
             ? candidates.Value!
             : Selected(candidates.Value!, Path.GetFullPath(root), request.Globs.AsSpan());
 
-        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false);
+        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, started, cancellationToken).ConfigureAwait(false);
     }
     private static async Task<string> ScannedAsync(
         List<WorkspacePath> files,
         TextSearchRequest request,
+        long started,
         CancellationToken cancellationToken)
     {
+        var chosen = Stopwatch.GetTimestamp();
         var matcher = TextMatcher.Create(request.Patterns, request.Regex, request.Word);
         var perFile = new FileHits[files.Count];
 
@@ -66,8 +71,9 @@ public static class TextSearchService
             .ConfigureAwait(false);
 
         var skipped = Array.FindIndex(perFile, file => file.Skipped > 0);
+        var answer = Render(request, perFile, skipped < 0 ? null : files[skipped].RelativePath);
 
-        return Render(request, perFile, skipped < 0 ? null : files[skipped].RelativePath);
+        return SearchTiming.Since(started, chosen, files.Count).Appended(answer, SlowCall.After);
     }
 
     private static Result<List<WorkspacePath>> Outside(string root, string glob)
@@ -1227,12 +1233,13 @@ public static class TextSearchService
 
     public static async Task<string> SearchUnderAsync(string root, TextSearchRequest request, CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var index = PathIndex.Build(root);
         var selected = request.Globs.IsDefaultOrEmpty
             ? Matched(index, root, request.Glob)
             : Selected(Matched(index, root, "**"), root, request.Globs.AsSpan());
 
-        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false);
+        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, started, cancellationToken).ConfigureAwait(false);
     }
 
     private static void FileShaped(ResponseBuilder response, List<string> records, TextSearchRequest request, SearchTally tally)

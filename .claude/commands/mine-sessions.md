@@ -253,8 +253,33 @@ MUTATE = {'replace_symbol', 'replace_symbol_body', 'add_member', 'delete_symbol'
 VERIFY = {'run_tests', 'rerun_failed', 'build', 'analyze', 'cleanup', 'format', 'get_diagnostics',
           'gate', 'list_tests', 'clean'}
 EDIT = MUTATE | {'NotebookEdit', 'extract_interface', 'move_type_to_namespace'}
-BATCH = {'read_text': 'paths', 'write_text': 'files', 'edit_text': 'edits',
-         'replace_symbol': 'symbolIds'}
+BATCH = {'read_text': ('paths',), 'get_file_outline': ('paths',), 'get_symbol_source': ('symbolIds',),
+         'get_symbol': ('symbolIds',), 'get_type_outline': ('symbolIds',), 'find_usages': ('symbolIds',),
+         'search_symbols': ('queries',), 'search_text': ('queries',), 'search_regex': ('queries',),
+         'find_files': ('globs',), 'analyze': ('paths',), 'format': ('paths',), 'cleanup': ('paths',),
+         'edit_text': ('edits',), 'write_text': ('files',), 'replace_symbol': ('symbolIds',),
+         'add_member': ('typeSymbolIds',), 'run_tests': ('projects', 'tests'), 'build': ('projects',),
+         'changed_files': ('paths',), 'diff_symbols': ('paths',)}
+SCOPE_FILES = ('glob', 'path', 'paths', 'root', 'exclude')
+SAME_SCOPE = {'search_text': SCOPE_FILES, 'search_regex': SCOPE_FILES,
+              'search_symbols': ('kind', 'scope', 'path'), 'get_symbol_source': ('path',),
+              'get_symbol': ('path', 'usages'), 'get_type_outline': ('path',),
+              'find_usages': ('impact', 'scope'),
+              'analyze': ('minSeverity', 'severity', 'ids', 'baseRef', 'changed'),
+              'format': ('verify', 'dryRun', 'changed'),
+              'cleanup': ('fix', 'verify', 'dryRun', 'changed', 'ids'),
+              'build': ('configuration', 'targetFramework', 'properties'),
+              'run_tests': ('configuration', 'targetFramework', 'filter', 'properties'),
+              'changed_files': ('baseRef', 'staged', 'root'), 'diff_symbols': ('baseRef', 'staged')}
+READONLY = {'read_text', 'get_file_outline', 'get_symbol', 'get_symbol_source', 'get_type_outline',
+            'search_symbols', 'search_text', 'search_regex', 'find_usages', 'find_implementations',
+            'find_files', 'find_registrations', 'list_endpoints', 'explore_symbol', 'impact_of',
+            'changed_files', 'diff_symbols', 'diff_text', 'history', 'workspace_status',
+            'list_workspaces', 'list_projects', 'solution_projects', 'package_list',
+            'project_properties', 'xaml_outline', 'xaml_find', 'xaml_names', 'xaml_bindings',
+            'xaml_resources', 'xaml_resolve', 'xaml_codebehind', 'xaml_styles', 'xaml_localization',
+            'resx_files', 'resx_find', 'resx_get', 'resx_usages', 'razor_outline', 'razor_find',
+            'razor_component', 'razor_bindings', 'razor_codebehind'}
 NARROW = ('project', 'filter', 'projects', 'test', 'path', 'paths', 'changed', 'baseRef')
 CODE_KEYS = ('newText', 'new_string', 'content', 'body', 'source', 'code', 'members', 'declaration')
 CODE_LISTS = ('declarations',)
@@ -267,6 +292,7 @@ SHELL_TEXT = re.compile(r'\b(grep|rg|cat|head|tail|sed|awk|ls|find|type)\b')
 SHELL_GIT = re.compile(r'\bgit\s+(status|diff)\b')
 SHELL_DOTNET = re.compile(r'\bdotnet\s+(build|test|clean|format)\b')
 SLEEP = re.compile(r'\bsleep\s+(\d+)')
+PS_SLEEP = re.compile(r'\b(?:Start-)?Sleep(?:\s+-(Seconds|Milliseconds|ms|s)\b)?\s+(\d+(?:\.\d+)?)', re.I)
 WAITLOOP = re.compile(r'\b(while|until|for)\b')
 ABSPATH = re.compile(r'[A-Za-z]:\\[\w.\-\\]+|/(?:Users|home|mnt|var|opt)/[\w.\-/]+')
 PADRUN = re.compile(r'(?<=\S) {2,}')
@@ -307,7 +333,7 @@ SLOW = (
     ('sync over async (.Result/.Wait)',
      re.compile(r'\.Result\b|\.Wait\(\)|GetAwaiter\(\)\.GetResult\(\)')),
     ('sync file I/O on the request path',
-     re.compile(r'\bFile\.(?:ReadAll|WriteAll|AppendAll|ReadLines|Open)\w*\s*\('
+     re.compile(r'\bFile\.(?:ReadAll|WriteAll|AppendAll|ReadLines|Open)\w*(?<!Async)\s*\('
                 r'|\bXDocument\.Load\s*\(|new\s+StreamReader\s*\(')),
     ('materializing LINQ (.ToList/.ToArray)', re.compile(r'\.To(?:List|Array)\(\)')),
     ('Substring/Split where a span slices', re.compile(r'\.Substring\s*\(|\.Split\s*\(')),
@@ -342,6 +368,10 @@ CUES = (('correction',
 
 def short(name):
     return name.split('__')[-1] if name.startswith('mcp__') else name
+
+
+def scope(call):
+    return tuple(json.dumps(call[1].get(key), sort_keys=True) for key in SAME_SCOPE.get(call[0], ()))
 
 
 def pick(arguments, keys):
@@ -474,6 +504,7 @@ line_freq = collections.Counter(); line_projects = collections.defaultdict(set)
 chains = collections.Counter(); same_target = collections.Counter(); refetch = collections.Counter()
 runs = collections.Counter(); longest = collections.Counter(); parallel = collections.Counter()
 unspent = collections.Counter(); unspent_gap = []; batch_missed = collections.Counter()
+single_read = collections.Counter(); single_read_multi = collections.Counter()
 tools_per_session = []
 verify_ms = collections.Counter(); verify_n = collections.Counter(); scoped = collections.Counter()
 repeat_gap = []; agent_ms = []; gaps = []; first_call = []
@@ -493,6 +524,7 @@ reshaped = collections.Counter(); shaped_ms = []
 per_session = []; payloads = []; turns = []; compactions = []; api_errors = collections.Counter()
 sessions = set(); slept = interrupted = think_chars = think_n = think_sealed = 0
 sleep_bare = sleep_bare_s = 0; sleep_ms = 0.0; serial_ms = 0.0
+ps_slept = ps_sleep_bare = ps_sleep_bare_s = 0; ps_sleep_ms = 0.0
 persisted_n = persisted_bytes = spill_files = spill_bytes = 0
 delegations = delegated_tokens = 0; delegated_ms = 0
 mcp_structured = mcp_structured_chars = 0
@@ -715,7 +747,8 @@ for path, project, spilled in walk():
                 arg_order.append((tool, arguments, block.get('id')))
                 call_at[block.get('id')] = at
                 if mid in msg_calls:
-                    msg_calls[mid][1].append((tool, arguments, block.get('id')))
+                    msg_calls[mid][1].append((tool, arguments, block.get('id'),
+                                              (block.get('name') or '').startswith('mcp__terse')))
                 if last_result_at and at and at >= last_result_at:
                     gaps.append((at - last_result_at) * 1000)
                 if tool == 'Bash':
@@ -736,6 +769,16 @@ for path, project, spilled in walk():
                         bash_kind['shell text tool'] += 1
                     else:
                         bash_kind['other'] += 1
+                elif tool == 'PowerShell':
+                    command = arguments.get('command', '') or ''
+                    found = PS_SLEEP.findall(command)
+                    if found:
+                        total = round(sum(float(value) / (1000 if unit.lower() in ('milliseconds', 'ms') else 1)
+                                          for unit, value in found))
+                        ps_slept += total
+                        if not WAITLOOP.search(command):
+                            ps_sleep_bare += 1
+                            ps_sleep_bare_s += total
                 if tool in EDIT:
                     session_edits += 1
                     spot = pick(arguments, PATH_KEYS)
@@ -845,6 +888,8 @@ for path, project, spilled in walk():
                     agent_ms.append(ms)
                 if tool == 'Bash' and SLEEP.search(arguments.get('command', '') or ''):
                     sleep_ms += ms
+                if tool == 'PowerShell' and PS_SLEEP.search(arguments.get('command', '') or ''):
+                    ps_sleep_ms += ms
     tools_per_session.append(len(session_tools))
     for count in by_message.values():
         parallel[min(count, 8)] += 1
@@ -870,6 +915,16 @@ for path, project, spilled in walk():
         done = result_at.get(first[1][0][2])
         if done and second[0] and second[0] >= done:
             unspent_gap.append((second[0] - done) * 1000)
+    for i, message_id in enumerate(msg_order):
+        at_of, uses, turn_of = msg_calls[message_id]
+        if len(uses) != 1 or not uses[0][3] or uses[0][0] not in READONLY or not at_of:
+            continue
+        year, week, _ = datetime.datetime.fromtimestamp(at_of, datetime.timezone.utc).isocalendar()
+        bucket = f'{year}-W{week:02d}'
+        single_read[bucket] += 1
+        if i + 1 < len(msg_order):
+            nxt = msg_calls[msg_order[i + 1]]
+            single_read_multi[bucket] += nxt[2] == turn_of and len(nxt[1]) >= 2
     for i in range(len(order) - 1):
         pair = (order[i][0], order[i + 1][0])
         if pair[0] != pair[1]:
@@ -889,10 +944,11 @@ for path, project, spilled in walk():
     i = 0
     while i < len(arg_order):
         j = i
-        while j + 1 < len(arg_order) and arg_order[j + 1][0] == arg_order[i][0]:
+        while j + 1 < len(arg_order) and arg_order[j + 1][0] == arg_order[i][0] \
+                and scope(arg_order[j + 1]) == scope(arg_order[i]):
             j += 1
-        key = BATCH.get(arg_order[i][0])
-        if key and j > i and not any(arg_order[k][1].get(key) for k in range(i, j + 1)) \
+        keys = BATCH.get(arg_order[i][0], ())
+        if keys and j > i and not any(arg_order[k][1].get(key) for k in range(i, j + 1) for key in keys) \
                 and not any(arg_order[k][1].get(field) for k in range(i, j + 1) for field in RANGED):
             batch_missed[arg_order[i][0]] += j - i + 1
         i = j + 1
@@ -1092,8 +1148,14 @@ for (first, second), count in unspent.most_common(12):
 
 print('\n== UNUSED BATCH PARAMETER: consecutive calls of a tool that already takes a list')
 for tool, count in batch_missed.most_common():
-    key = BATCH.get(tool, '?')
-    print(f'  {tool:<34}{count:>6} calls  {key}=  unused  ~{count * gp50 / 3.6e6:>5.2f} h of gap')
+    keys = '|'.join(BATCH.get(tool, ('?',)))
+    print(f'  {tool:<34}{count:>6} calls  {keys}=  unused  ~{count * gp50 / 3.6e6:>5.2f} h of gap')
+
+print('\n== SINGLE-READ next message multi-call, per ISO week (M4.2; next tool message, same turn)')
+for bucket in sorted(single_read):
+    n = single_read[bucket]
+    print(f'  {bucket}  single-read next message multi-call {single_read_multi[bucket] * 100 / n:.1f}%  '
+          f'n={n:,}  baseline 26.2%')
 
 print('\n== tools ranked by TOTAL WALL TIME (the speed lever, not the token lever)')
 for tool, spent in sorted(durations.items(), key=lambda kv: -sum(kv[1]))[:25]:
@@ -1126,6 +1188,8 @@ for tool, count in dupes.most_common(10):
 print('\n== blind waits and delegation')
 print(f'  sleep-bearing Bash declared {slept:,}s = {slept / 3600:.1f}h, actual wall {sleep_ms / 3.6e6:.1f}h')
 print(f'  BARE sleeps (no while/until/for guard): {sleep_bare} calls, {sleep_bare_s:,}s = {sleep_bare_s / 3600:.1f}h')
+print(f'  PowerShell Start-Sleep declared {ps_slept:,}s = {ps_slept / 3600:.1f}h, actual wall '
+      f'{ps_sleep_ms / 3.6e6:.1f}h; BARE {ps_sleep_bare} calls, {ps_sleep_bare_s:,}s')
 if agent_ms:
     print(f'  Agent (subagent): {len(agent_ms)}x  {sum(agent_ms) / 3.6e6:.2f}h  '
           f'p90={q(agent_ms, .9) / 1000:.0f}s p99={q(agent_ms, .99) / 1000:.0f}s max={max(agent_ms) / 1000:.0f}s')
@@ -1240,7 +1304,7 @@ print(f'== SPEEDLINE cycles={cycles} callspercycle={sum(cycles_c) / max(len(cycl
       f'multipct={multi * 100 / max(msgs, 1):.1f} unspent={sum(unspent.values())} '
       f'batchmissed={sum(batch_missed.values())} redundantpct={dup_calls * 100 / max(total_calls, 1):.1f} '
       f'verifyh={verify_total / 3.6e6:.1f} duph={(dup_ms + dup_calls * gp50) / 3.6e6:.1f} '
-      f'baresleeps={sleep_bare}')
+      f'baresleeps={sleep_bare} psbaresleeps={ps_sleep_bare}')
 print(f'== EMITTED editcalls={sum(edit_calls.values())} rejects={sum(edit_rejects.values())} '
       f'lines={emitted_lines} legacy={sum(legacy.values())} slow={sum(slow.values())} '
       f'prompts={prompts} interventions={interventions} traps={sum(traps.values())}')
@@ -1308,8 +1372,10 @@ and the next run must be comparable.
      N records, so a detector that walks records would compare a message's own parallel siblings —
      which are independent by definition — and report the corpus's best behaviour as its worst;
    - **unused batch parameter** — consecutive calls of a tool that *already* accepts a list
-     (`read_text paths=`, `write_text files=`, `edit_text edits=`, `replace_symbol symbolIds=`) where
-     no call in the run passed it. This is the highest-value class the script produces: the capability
+     (every tool `BATCH` names - 21 since `I933`, `read_text paths=` to `run_tests projects=`/`tests=`)
+     where no call in the run passed it and every call shares the scope `SAME_SCOPE` names - two
+     `search_text` calls over different globs are two file sets,
+     not a missed `queries=`. This is the highest-value class the script produces: the capability
      shipped, the agent did not use it, so the lever is `(e)` teaching and costs no server change at
      all;
    - **redundant share** — identical arguments inside one session, against MCP-Bench's `<10%` bar. A
@@ -1375,6 +1441,16 @@ and the next run must be comparable.
     asserts that no id was counted twice. The 2026-11-07 run (`c84aa03`) may already carry part of
     the inflation, so a trend across this fix is not comparable on calls, fan-out, the redundant
     share or the duplicate rows - say so rather than reporting an improvement.
+
+11. **Four counters stopped misreporting (`I933`).** The 2026-11-20 run found the `sync file I/O`
+    pattern matching `File.ReadAllTextAsync(`, the overload the async gate asks for, so it now refuses
+    an `Async` suffix; `BATCH` named 4 of the 21 tools that take a list (384 unused-batch calls on the
+    shipped map against 708 on a widened one in that run), so it names all 21 and a run counts only
+    when its calls share the scope `SAME_SCOPE` names - two searches over different globs are two file
+    sets, and `format` then `format verify=true` is two questions; M4.2's single-read share is printed
+    per ISO week of the message timestamp; and `PowerShell` `Start-Sleep` is counted beside the `Bash`
+    sleeps on its own line. The unused-batch trend is not comparable across this fix - say so rather
+    than reporting a regression.
 
 **Two refinements, so the script does not over-claim either:**
 

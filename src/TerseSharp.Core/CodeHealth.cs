@@ -10,6 +10,10 @@ public sealed record CodeHealthScore(double Score, ImmutableArray<CodeSmell> Sme
 {
     private const int Named = 3;
 
+    private const string LargeFileExit = "the file carries Large File, which no addition to it can clear - put the new members in a new file, a partial of the type when they need its private members";
+
+    public string? Exit => Smells.Any(static smell => smell.Name is CodeHealth.LargeFileName) ? LargeFileExit : null;
+
     public string Describe()
     {
         var worst = Smells.OrderByDescending(smell => smell.Penalty).Take(Named).Select(smell => smell.Name + " " + smell.Member);
@@ -29,6 +33,7 @@ public static class CodeHealth
     public const int DeepNestingLevels = 4;
     public const int BumpyRoadBumps = 2;
     public const int LargeFileLines = 1000;
+    public const string LargeFileName = "Large File";
 
     private const double LargeFilePenalty = 1.0;
 
@@ -68,7 +73,7 @@ public static class CodeHealth
             .ToList();
 
         if (SyntaxShape.Lines(root) > LargeFileLines)
-            smells.Add(new CodeSmell("Large File", "<file>", LargeFilePenalty));
+            smells.Add(new CodeSmell(LargeFileName, "<file>", LargeFilePenalty));
 
         var score = Math.Max(Floor, Perfect - smells.Sum(smell => smell.Penalty));
 

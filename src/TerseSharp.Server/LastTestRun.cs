@@ -7,10 +7,14 @@ public sealed record TestRunMemory(
     string Target,
     ImmutableArray<string> FailedTests,
     BuildScope Scope = default,
-    bool Unfiltered = false)
+    bool Unfiltered = false,
+    UnbuiltRun? Unbuilt = null)
 {
     public bool Covers(string workspaceRoot) =>
         WorkspaceRoot.Equals(workspaceRoot, PathBoundary.Comparison) && !FailedTests.IsDefaultOrEmpty;
+
+    public bool Replayable(string workspaceRoot) =>
+        Unbuilt is not null && FailedTests.IsDefaultOrEmpty && WorkspaceRoot.Equals(workspaceRoot, PathBoundary.Comparison);
 
     public TestRunMemory After(TestRunMemory run, IEnumerable<string> passedTests, int limit) =>
         Outstanding(run.WorkspaceRoot, passedTests) switch
@@ -80,9 +84,9 @@ public sealed class LastTestRun
         }
     }
 
-    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null, bool unfiltered = false, string? solutionPath = null)
+    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null, bool unfiltered = false, string? solutionPath = null, UnbuiltRun? unbuilt = null)
     {
-        var run = new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope, unfiltered);
+        var run = new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope, unfiltered, unbuilt);
 
         var key = solutionPath ?? workspaceRoot;
 
@@ -112,3 +116,5 @@ public sealed class LastTestRun
         runs.Remove(oldest);
     }
 }
+
+public sealed record UnbuiltRun(string? Filter, ImmutableArray<string> Targets);

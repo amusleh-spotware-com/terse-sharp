@@ -17,6 +17,7 @@ public static class McpHost
             string? tools,
             CancellationToken cancellationToken)
     {
+        CrashLog.Install(ClientRegistrar.Home());
         OfferMemo.Remember(OfferMode.Once(Environment.GetEnvironmentVariable(OfferMode.Variable)));
 
         var builder = Host.CreateApplicationBuilder();

@@ -2063,4 +2063,28 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_ForADedentedAnchorWhoseFirstLineIsTheTailOfALongerKey_RewritesNothing()
+    {
+        const string Probe = "terse-identifier-suffix-probe.md";
+        const string Content = "# Probe\n\n  foo_enabled: true\n  bar: 1\n";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "enabled: true\nbar: 1", ["newText"] = "enabled: false\nbar: 2" });
+
+            Assert.Contains("ERROR", refused, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("foo_enabled: true", read, StringComparison.Ordinal);
+            Assert.Contains("bar: 1", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("foo_enabled: false", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

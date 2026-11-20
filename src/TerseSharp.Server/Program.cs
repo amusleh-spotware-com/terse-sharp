@@ -23,7 +23,7 @@ static async Task<int> CommandLineAsync(string[] arguments)
     var toolsOption = new Option<string?>("--tools") { Description = TerseSharp.Server.ToolProfile.ToolsOptionDescription };
 
     var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption, idleMinutesOption, toolsOption };
-    var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead, and lift the folder-rules hold on that response's sibling writes; it writes nothing." };
+    var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead: lift the folder-rules hold on that response's sibling writes, and after a batch of one read-only terse call remind the agent to batch - in half the sessions by session id hash; the other half is held out." };
 
     var folderRulesOption = new Option<bool>("--folder-rules") { Description = "Read a Claude Code PreToolUse, PostToolUse or SessionStart payload for a terse call instead, and inject the nested CLAUDE.md files above the paths it touched once per session - Claude Code loads them only for its own Read, Edit and Write. The first terse write that names a path below rules the session has not seen is denied with them; a compaction forgets what was shown." };
 

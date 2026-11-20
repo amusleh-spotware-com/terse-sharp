@@ -219,6 +219,17 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
             var memory = lastRun.Recall(target.SolutionPath);
 
+            if (memory.Replayable(target.Root))
+            {
+                var replayScope = Scoped(configuration, targetFramework, properties);
+
+                return UnbuiltReplay.Refused(tests, exclude) is { } refusal
+                    ? Task.FromResult(refusal)
+                    : replayScope.IsOk
+                        ? Noted(RunAsync(target, UnbuiltReplay.Request(memory, noBuild, Seconds(timeoutSeconds), verbose, replayScope.Value), stopping), UnbuiltReplay.Note)
+                        : Task.FromResult(replayScope.Error!.Render());
+            }
+
             if (!memory.Covers(target.Root))
             {
                 return Task.FromResult(Errors.Invalid(
@@ -436,22 +447,22 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         }
     }
 
-    private Task<string> RunAsync(WorkspaceTarget workspace, TestRunRequest request, CancellationToken cancellationToken) =>
-        RecoveredAsync(workspace, "test run", async () =>
-        {
-            var result = await DotnetRunner.TestAsync(workspace, request, cancellationToken).ConfigureAwait(false);
+    private Task<string> RunAsync(WorkspaceTarget workspace, TestRunRequest request, CancellationToken cancellationToken) => RecoveredAsync(workspace, "test run", async () =>
+{
+    var result = await DotnetRunner.TestAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
-            lastRun.Remember(
-                workspace.Root,
-                request.Target,
-                result.Report.Failures.Select(failure => failure.Name),
-                request.Scope,
-                result.Report.PassedTests.Select(test => test.Name),
-                TestRunMemory.Whole(request.Filter, request.Targets, result.Report.Total),
-                solutionPath: workspace.SolutionPath);
+    lastRun.Remember(
+        workspace.Root,
+        request.Target,
+        result.Report.Failures.Select(failure => failure.Name),
+        request.Scope,
+        result.Report.PassedTests.Select(test => test.Name),
+        TestRunMemory.Whole(request.Filter, request.Targets, result.Report.Total),
+        solutionPath: workspace.SolutionPath,
+        unbuilt: result.BuildFailed ? new UnbuiltRun(request.Filter, request.Targets) : null);
 
-            return new LockedRun(result.Response, result.Locked);
-        }, cancellationToken);
+    return new LockedRun(result.Response, result.Locked);
+}, cancellationToken);
 
     internal static Result<string?> Selection(string? test, string?[]? tests, string? filter)
     {

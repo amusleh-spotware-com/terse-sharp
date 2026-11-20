@@ -68,10 +68,21 @@ public sealed class ChangedTestSelectionE2ETests
         }
     }
 
-    private static Task<TerseServerProcess> StartAsync() => TerseServerProcess.StartAsync(
-        SelectionRoot,
-        [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(SelectionRoot, "SelectionSolution.slnx")],
+    private static Task<TerseServerProcess> StartAsync() => StartAsync(SelectionRoot);
+
+    private static Task<TerseServerProcess> StartAsync(string root) => TerseServerProcess.StartAsync(
+        root,
+        [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(root, "SelectionSolution.slnx")],
         TestContext.Current.CancellationToken);
+
+    private static string IsolatedSelectionCopy()
+    {
+        var root = Path.Combine(TerseServerFixture.RepositoryRoot, "artifacts", "e2e-selection-" + Guid.NewGuid().ToString("N"));
+
+        TerseTempSolution.Copy(SelectionRoot, root);
+
+        return root;
+    }
 
     private static Task<string> CallAsync(TerseServerProcess server, string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
@@ -430,18 +441,27 @@ public sealed class ChangedTestSelectionE2ETests
     [Fact]
     public async Task RunTests_Detached_AnswersAnIdAtOnce_AndStatusReturnsTheFinishedVerdict()
     {
-        var server = await StartAsync();
+        var root = IsolatedSelectionCopy();
 
         try
         {
-            var started = await CallAsync(server, "run_tests", new() { ["projects"] = new[] { "Selection.Core.Tests" }, ["detach"] = true });
+            var server = await StartAsync(root);
 
-            Assert.StartsWith(DetachedPrefix, started, StringComparison.Ordinal);
-            Assert.StartsWith("run_tests PASSED", await FinishedAsync(server, Id(started)), StringComparison.Ordinal);
+            try
+            {
+                var started = await CallAsync(server, "run_tests", new() { ["projects"] = new[] { "Selection.Core.Tests" }, ["detach"] = true });
+
+                Assert.StartsWith(DetachedPrefix, started, StringComparison.Ordinal);
+                Assert.StartsWith("run_tests PASSED", await FinishedAsync(server, Id(started)), StringComparison.Ordinal);
+            }
+            finally
+            {
+                await server.StopAsync();
+            }
         }
         finally
         {
-            await server.StopAsync();
+            TerseTempSolution.Delete(root);
         }
     }
 

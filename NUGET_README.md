@@ -103,7 +103,7 @@ in one call.
 
 ## 🛡️ Stays on the rails
 
-- **The guard.** `terse install --guard` blocks `Read`, `Grep`, `cat` and `dotnet build` on C#, and
+- **The guard.** `terse install --guard` blocks `Read`, `Grep`, `cat` and `dotnet build` on C# - in `Bash` and `PowerShell` alike - and
   hands the agent the exact TerseSharp call to make instead, with the `ToolSearch select:` that loads its schema.
 - **Read-only mode.** `terse serve --read-only` makes every write refuse.
 - **The right solution.** With several in one folder, the one named for your OS loads first;

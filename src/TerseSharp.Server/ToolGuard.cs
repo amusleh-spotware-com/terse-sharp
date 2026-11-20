@@ -30,6 +30,7 @@ public static partial class ToolGuard
         "Glob" => OnPath(tool, Text(input, "pattern")),
         "Grep" => OnGrep(input),
         "Bash" => OnBash(Text(input, "command"), cwd),
+        "PowerShell" => OnPowerShell(Text(input, "command"), cwd),
         "TaskOutput" or "TaskList" => Polling(),
         _ => Allowed,
     };
@@ -250,7 +251,7 @@ public static partial class ToolGuard
         return TextCommands.Contains(Path.GetFileNameWithoutExtension(first), StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool Covered(string text) => Tokens(text).Any(IsDotNet);
+    private static bool Covered(string text) => Tokens(text).Any(IsDotNet) || Braced(text);
 
     private static readonly char[] Separators = [' ', '\t', '"', '\'', '=', ',', '(', ')', '\n', '\r'];
 
@@ -1742,7 +1743,7 @@ public static partial class ToolGuard
     private static bool Denies(string segment, string? cwd, bool fed, bool adrift = false) =>
         IsTextRead(segment)
         && !(fed && ReadsStdin(segment))
-        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd, adrift) && !Unresolved(segment)));
+        && (Covered(segment) || (IsDotNetTree(cwd) && (Unbound(segment) || (Operanded(segment) && !OutsideTree(segment, cwd, adrift))) && !Unresolved(segment)));
 
     private static int Written(ReadOnlySpan<char> token)
     {
@@ -2450,7 +2451,7 @@ public static partial class ToolGuard
         if (Unrolled(command, Joined) is not { } unrolled)
             return verdict;
 
-        if (!environed && Environed(command) is { } filled && Unrolling(filled, cwd, environed: true) is { Denied: false } literal)
+        if (!environed && Spelled(command, cwd) is { } literal)
             return literal;
 
         if (verdict.Denied)

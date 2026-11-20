@@ -155,7 +155,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. With several loaded and no workspace=, one line per workspace instead. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round, and - in a workspace that declares [McpServerTool] methods - estimates each one's schema from the working tree's own [Description] text (HEURISTIC), naming every tool that differs from the running server or passes the 1024-token cap. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING; pass guards=[...] to judge up to 10 commands in ONE call. Replaces one call per command: one ALLOWED or DENIED line each, in input order, with the call that replaces it.")]
     public Task<string> WorkspaceStatus(
             [Description("Workspace or worktree name.")] string? workspace = null,
-            [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
+            [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, retired, shadow and phases self-checks. Default false.")] bool verbose = false,
             [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending, plus a working-tree estimate for tools whose source differs or passes the cap. Default false.")] bool tools = false,
             [Description("A shell command to judge against the PreToolUse guard, e.g. \"grep -rn TODO src\". Answers ALLOWED or DENIED with the reason and the call that replaces it, and NOTHING is executed - which is the only way to triage a destructive command. Answered alone, in the workspace's own directory.")] string? guard = null,
             [Description("Several shell commands judged in ONE call, at most 10, one ALLOWED or DENIED line each in input order with the call that replaces it; verbose=true adds each reason. Combines with guard, taken first; a blank or 11th entry is refused by name. NOTHING is executed.")] string?[]? guards = null,
@@ -216,6 +216,9 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
         if (LingeringServers.Warning() is { } lingering)
             response.Note(lingering);
+
+        if (CrashLog.Warning() is { } crashed)
+            response.Note(crashed);
 
         await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
         AppendMappedAnalyzers(response, workspace, verbose);
@@ -305,6 +308,10 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             response.Note(Shown(loaded, result.SolutionPath));
 
         response.Note(Loaded(result, verbose));
+
+        if (result.Eviction is { } eviction)
+            response.Note(eviction.Describe(DateTimeOffset.UtcNow));
+
         AppendLoadDiagnostics(response, result, verbose);
         AppendRestore(response, result.Unrestored);
 

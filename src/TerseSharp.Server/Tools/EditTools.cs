@@ -386,7 +386,9 @@ public sealed class EditTools(ToolContext context)
         bool Rename = false,
         MemberPlacement? Placement = null,
         FileService.TextEdit[]? Edits = null,
-        bool Preview = false);
+        bool Preview = false,
+        bool[]? Forced = null,
+        bool Overwrite = false);
 
     internal static string Carried(Result<string> result, Carry carry, string root) =>
         result.IsOk ? Previewed(result.Value!, carry, root) : Rejected(result.Error!, carry, root);
@@ -399,7 +401,7 @@ public sealed class EditTools(ToolContext context)
     };
 
     private static string Remember(string tool, Carry carry, string root) => RejectedEdits.Remember(
-            root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits);
+        root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits, carry.Forced, carry.Overwrite);
 
     internal static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
         ? Errors.Invalid(

@@ -304,4 +304,30 @@ public sealed class SnippetSearchTests
 
         Assert.False(match.Shifted);
     }
+
+    [Theory]
+    [InlineData("  foo_enabled: true\n  bar: 1\n")]
+    [InlineData("  fooenabled: true\n  bar: 1\n")]
+    [InlineData("  foo9enabled: true\n  bar: 1\n")]
+    public void Find_ForADedentedAnchorWhoseFirstLineIsTheTailOfALongerIdentifier_StaysUnmatched(string text)
+    {
+        var match = SnippetSearch.Find(text, "enabled: true\nbar: 1", 1);
+
+        Assert.Equal(0, match.Occurrences);
+        Assert.Equal(-1, match.Start);
+    }
+
+    [Theory]
+    [InlineData("    bool M() => !Call(a,\n        b);\n", "Call(a,\n    b);", "Call(a,\n        b);")]
+    [InlineData("    int M() => Call(a,\n        b);\n", "(a,\n    b);", "(a,\n        b);")]
+    [InlineData("    int M() => Call(a,\n        b);\n", "Call(a,\n    b);", "Call(a,\n        b);")]
+    public void Find_ForAMidLineHeadNotGluedToALongerIdentifier_StillMatchesMidLine(string text, string anchor, string expected)
+    {
+        var match = SnippetSearch.Find(text, anchor, 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.True(match.MidLine);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal(expected, text[match.Start..(match.Start + match.Length)]);
+    }
 }

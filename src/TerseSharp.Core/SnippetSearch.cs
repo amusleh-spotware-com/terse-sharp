@@ -300,10 +300,10 @@ public static class SnippetSearch
     {
         var wanted = needle.TrimEnd();
         var trimmed = line.TrimEnd();
+        var start = trimmed.Length - wanted.Length;
+        var headed = !wanted.IsEmpty && trimmed.EndsWith(wanted, StringComparison.Ordinal) && !IdentifierBoundary.Splits(trimmed, start, wanted);
 
-        return wanted.IsEmpty || !trimmed.EndsWith(wanted, StringComparison.Ordinal)
-            ? AnchorRegion.None
-            : region with { Start = at + trimmed.Length - wanted.Length, End = at + line.Length, MidLine = true };
+        return headed ? region with { Start = at + start, End = at + line.Length, MidLine = true } : AnchorRegion.None;
     }
 
     private static AnchorRegion Tailed(ReadOnlySpan<char> text, int at, int end, ReadOnlySpan<char> needle, AnchorRegion region)

@@ -235,4 +235,52 @@ public sealed class LastTestRunTests
         Assert.True(lastRun.Recall("C:\\s16").Covers(Root));
         Assert.Equal(15, lastRun.Elsewhere("C:\\s16").Length);
     }
+
+    [Fact]
+    public void Remember_ARunWhoseBuildFailed_IsReplayableWithItsFilterAndTargets()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "C:\\repo\\All.slnx", [], solutionPath: "C:\\repo\\All.slnx", unbuilt: new UnbuiltRun("FullyQualifiedName~Ns.A|FullyQualifiedName~Ns.B", ["C:\\repo\\A.Tests.csproj"]));
+        var memory = lastRun.Recall("C:\\repo\\All.slnx");
+
+        Assert.True(memory.Replayable(Root));
+        Assert.False(memory.Covers(Root));
+        Assert.Equal("C:\\repo\\All.slnx", memory.Target);
+        Assert.Equal("FullyQualifiedName~Ns.A|FullyQualifiedName~Ns.B", memory.Unbuilt!.Filter);
+        Assert.Equal(["C:\\repo\\A.Tests.csproj"], memory.Unbuilt.Targets);
+    }
+
+    [Fact]
+    public void Remember_AGreenRunAfterAnUnbuiltOne_ForgetsTheReplay()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "one.csproj", [], unbuilt: new UnbuiltRun("FullyQualifiedName~Ns.A", default));
+        lastRun.Remember(Root, "one.csproj", [], passedTests: ["Ns.A"]);
+
+        Assert.False(lastRun.Recall(Root).Replayable(Root));
+    }
+
+    [Fact]
+    public void Remember_AnUnbuiltRunAfterRememberedFailures_KeepsTheFailuresInsteadOfAReplay()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "one.csproj", ["Ns.Tests.One"]);
+        lastRun.Remember(Root, "one.csproj", [], unbuilt: new UnbuiltRun("FullyQualifiedName~Ns.Tests.Two", default));
+
+        Assert.Equal(["Ns.Tests.One"], lastRun.Recall(Root).FailedTests);
+        Assert.False(lastRun.Recall(Root).Replayable(Root));
+    }
+
+    [Fact]
+    public void Replayable_AnotherWorkspace_IsFalse()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "one.csproj", [], unbuilt: new UnbuiltRun("FullyQualifiedName~Ns.A", default));
+
+        Assert.False(lastRun.Recall(Root).Replayable("C:\\other"));
+    }
 }

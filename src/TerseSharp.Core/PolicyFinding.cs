@@ -11,7 +11,8 @@ public sealed record PolicyFinding(
     string Measured,
     string Allowed,
     string Relation = "exceeds",
-    double? Health = null)
+    double? Health = null,
+    string? Exit = null)
 {
     public string Key => string.Create(
             CultureInfo.InvariantCulture,
@@ -27,7 +28,7 @@ public sealed record PolicyFinding(
 
     public string Explain() => string.Create(
         CultureInfo.InvariantCulture,
-        $"{Render()}\n  fix: {PolicyRules.Of(Rule).Remedy}");
+        $"{Render()}\n  fix: {PolicyRules.Of(Rule).Remedy}{(Exit is null ? null : "; ")}{Exit}");
 
     private string Severity() => Action is PolicyAction.Reject ? "warning" : "info";
 }

@@ -9,7 +9,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "analyze", ReadOnly = true)]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares and no enforced .terse.json policy rule emits is named NOT_ENABLED instead of answering a silent zero. baseRef=HEAD reports only the findings on lines this working tree ADDED or CHANGED against that ref - an untracked file counts whole - and folds the rest to one count, which is what makes the end-of-task verdict mean this task rather than this repository; a baseRef call always runs, because git state can move with nothing written. changed=true with no baseRef= is baseRef=HEAD on a git tree, so the end-of-task sweep reports what this task changed; baseRef=\"\" reports every finding in the changed files. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call. What a call does not reach - past 10 paths, or past timeoutSeconds - is named PARTIAL with next:.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares and no enforced .terse.json policy rule emits is named NOT_ENABLED instead of answering a silent zero. baseRef=HEAD reports only the findings on lines this working tree ADDED or CHANGED against that ref - an untracked file counts whole - and folds the rest to one count, which is what makes the end-of-task verdict mean this task rather than this repository. changed=true with no baseRef= is baseRef=HEAD on a git tree, so the end-of-task sweep reports what this task changed; baseRef=\"\" reports every finding in the changed files. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call. What a call does not reach - past 10 paths, or past timeoutSeconds - is named PARTIAL with next:.")]
     public Task<string> Analyze(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
             [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
@@ -26,8 +26,8 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         CancellationToken cancellationToken = default) => Aliases.Clash(new ParameterSpelling("minSeverity", minSeverity), new ParameterSpelling("severity", severity)) is { } clash ? Task.FromResult(clash) : replay.ReplayedAsync(
         "analyze",
-        ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, Defaulted(baseRef), workspace, exclude, timeoutSeconds.ToString(CultureInfo.InvariantCulture)),
-        sinceLast || baseRef is { Length: > 0 } || (changed && baseRef is null),
+        ReplayGate.GitKeyed(ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), sinceLast.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, Defaulted(baseRef), workspace, exclude, timeoutSeconds.ToString(CultureInfo.InvariantCulture)),
+        baseRef, changed), sinceLast,
         () => context.WithWorkspaceAsync(
         workspace,
         path ?? First(paths),
@@ -211,8 +211,8 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                 ? Task.FromResult(rejected)
                 : replay.ReplayedAsync(
                 "gate",
-                ReplayGate.Key("gate", path, solution.ToString(), dryRun.ToString(), verbose.ToString(), baseRef, Defaulted(baseRef), workspace, paths is null ? null : string.Join('\n', paths)),
-                !dryRun || NarrowedByGit(baseRef, GitDefaulted(path, paths, solution)),
+                ReplayGate.GitKeyed(ReplayGate.Key("gate", path, solution.ToString(), dryRun.ToString(), verbose.ToString(), baseRef, Defaulted(baseRef), workspace, paths is null ? null : string.Join('\n', paths)),
+                baseRef, GitDefaulted(path, paths, solution)), !dryRun,
                 () => Guarded(workspace, path ?? FirstScope(paths), async Task<Result<string>> (loaded) =>
                 {
                     var targets = GateSkips.Split(loaded, path, paths);
@@ -383,8 +383,6 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
     }
 
     private static string Defaulted(string? baseRef) => baseRef is null ? "defaulted" : "explicit";
-
-    private static bool NarrowedByGit(string? baseRef, bool defaulted) => baseRef is { Length: > 0 } || (baseRef is null && defaulted);
 
     private static bool GitDefaulted(string? path, string?[]? paths, bool solution) => path is not null || paths is not null || !solution;
 

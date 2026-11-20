@@ -37,6 +37,27 @@ public static class ReferenceService
             .ConfigureAwait(false);
     }
 
+    public static async Task<string> OverloadsOrRefusalAsync(
+        LoadedWorkspace workspace,
+        SourceService.AmbiguousRead read,
+        Func<ISymbol, Task<string>> usagesOf,
+        CancellationToken cancellationToken)
+    {
+        var overloads = read.Error.Code is TerseErrorCode.AmbiguousSymbol
+            ? await SymbolLookup.OverloadsAsync(workspace, read.SymbolId, read.Path, cancellationToken).ConfigureAwait(false)
+            : [];
+
+        if (overloads.Count is 0)
+            return read.Error.Render();
+
+        var response = new ResponseBuilder("find_usages", read.SymbolId);
+
+        foreach (var overload in overloads)
+            response.Line(string.Concat("overload ", SymbolLookup.Addressable(overload), "\n", await usagesOf(overload).ConfigureAwait(false)));
+
+        return response.Answered(overloads.Count, overloads.Count, "overloads").ToString();
+    }
+
     public static async Task<string> FindImplementationsAsync(
             LoadedWorkspace workspace,
             ISymbol symbol,

@@ -275,7 +275,7 @@ public static class PolicyService
         _ => null,
     };
 
-    private readonly record struct Measure(string Measured, string Allowed, string Relation = "exceeds", double? Health = null);
+    private readonly record struct Measure(string Measured, string Allowed, string Relation = "exceeds", double? Health = null, string? Exit = null);
 
     private sealed record Scope(string Path, PolicyOptions Options, List<PolicyFinding> Found)
     {
@@ -298,7 +298,8 @@ public static class PolicyService
                 found.Measured,
                 found.Allowed,
                 found.Relation,
-                found.Health));
+                found.Health,
+                found.Exit));
         }
 
         private static string Declaration(SyntaxNode node) => node.AncestorsAndSelf()
@@ -419,6 +420,6 @@ public static class PolicyService
 
         return health.Score >= threshold
             ? null
-            : new Measure(health.Describe(), threshold.ToString(CultureInfo.InvariantCulture), "is below", health.Score);
+            : new Measure(health.Describe(), threshold.ToString(CultureInfo.InvariantCulture), "is below", health.Score, health.Exit);
     }
 }

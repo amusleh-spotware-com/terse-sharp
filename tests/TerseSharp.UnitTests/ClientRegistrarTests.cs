@@ -244,7 +244,7 @@ public sealed class ClientRegistrarTests : IDisposable
 
         Assert.Contains("installed guard", refreshed!, StringComparison.Ordinal);
         Assert.Contains(matchers, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "other-tool");
-        Assert.Contains(matchers, entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash");
+        Assert.Contains(matchers, entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell");
         Assert.DoesNotContain(matchers, entry => Matcher(entry) is "Read");
     }
 
@@ -340,7 +340,7 @@ public sealed class ClientRegistrarTests : IDisposable
 
         Assert.Single(batch, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "terse guard --post-batch");
         Assert.Contains(batch, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "other-batch-tool");
-        Assert.Single(hooks["PreToolUse"]!.AsArray(), entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash");
+        Assert.Single(hooks["PreToolUse"]!.AsArray(), entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell");
     }
 
     [Fact]

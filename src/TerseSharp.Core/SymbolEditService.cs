@@ -883,12 +883,12 @@ public static class SymbolEditService
 
         var landed = await LandedAsync(workspace.Solution, edits, options.Usings, appended, cancellationToken).ConfigureAwait(false);
 
-        if (!landed.IsOk)
-            return Result.Fail<string>(landed.Error!);
+        if (!landed.Solution.IsOk)
+            return Result.Fail<string>(landed.Solution.Error!);
 
-        var applied = await EditGate.ApplyAsync(workspace, landed.Value!, [.. edits.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
+        var applied = await EditGate.ApplyAsync(workspace, landed.Solution.Value!, [.. edits.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
 
-        return Warned(applied, Dropped(planned) + Renamed(planned));
+        return Warned(applied, Dropped(planned) + Renamed(planned) + landed.Note);
     }
 
     private static async Task<Result<Solution>> SplicedAsync(
@@ -913,7 +913,7 @@ public static class SymbolEditService
         return Result.Ok(current);
     }
 
-    private static async Task<Result<Solution>> LandedAsync(
+    private static async Task<LandedBatch> LandedAsync(
         Solution solution,
         IGrouping<DocumentId, PlannedEdit>[] edits,
         System.Collections.Immutable.ImmutableArray<string> usings,
@@ -923,13 +923,17 @@ public static class SymbolEditService
         var full = await SplicedAsync(solution, edits, _ => usings, appended, cancellationToken).ConfigureAwait(false);
 
         if (!full.IsOk || usings.IsDefaultOrEmpty || edits.Length < 2)
-            return full;
+            return new(full, string.Empty);
 
         var needed = await NeededUsingsAsync(full.Value!, edits, usings, appended, cancellationToken).ConfigureAwait(false);
 
-        return needed.Values.All(kept => kept.Count == usings.Length)
-            ? full
-            : await SplicedAsync(solution, edits, document => Landed(usings, needed, document), appended, cancellationToken).ConfigureAwait(false);
+        if (needed.Values.All(kept => kept.Count == usings.Length))
+            return new(full, string.Empty);
+
+        var imported = await BatchUsings.ImportedAsync(solution, needed.Keys, usings, cancellationToken).ConfigureAwait(false);
+        var landed = await SplicedAsync(solution, edits, document => Landed(usings, needed, imported, document), appended, cancellationToken).ConfigureAwait(false);
+
+        return new(landed, landed.IsOk ? BatchUsings.Skipped(usings, needed.Keys, document => Landed(usings, needed, imported, document), imported) : string.Empty);
     }
 
     private static async Task<Dictionary<DocumentId, List<string>>> NeededUsingsAsync(
@@ -988,8 +992,9 @@ public static class SymbolEditService
     private static System.Collections.Immutable.ImmutableArray<string> Landed(
         System.Collections.Immutable.ImmutableArray<string> usings,
         Dictionary<DocumentId, List<string>> needed,
+        Dictionary<DocumentId, HashSet<string>> imported,
         DocumentId document) =>
-        [.. usings.Where(entry => needed[document].Contains(entry) || !needed.Values.Any(kept => kept.Contains(entry)))];
+        [.. usings.Where(entry => needed[document].Contains(entry) || (!needed.Values.Any(kept => kept.Contains(entry)) && !imported.Values.Any(present => present.Contains(entry))))];
 
     private static Task<Result<Solution>> GroupedAsync(
             Solution solution,

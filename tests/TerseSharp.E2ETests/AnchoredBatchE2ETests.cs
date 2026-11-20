@@ -479,4 +479,25 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("declarations[0]:", text, StringComparison.Ordinal);
         Assert.Contains("of 35: public int Tripled( => Count() * 3;", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsAndAUsingOneFileAlreadyImports_LandsItInNoOtherFileAndNamesTheSkip()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.RestGateway", "T:Fixture.Trading.TwinBravo" },
+            ["declarations"] = new[]
+            {
+                "public string Formatted() => Retries.ToString(CultureInfo.InvariantCulture);",
+                "public int Doubled() => Count() * 2;",
+            },
+            ["usings"] = new[] { "System.Globalization" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("2 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+using System.Globalization;", text, StringComparison.Ordinal);
+        Assert.Contains("NOTE usings= skipped in files that do not use them: System.Globalization in 1 file(s)", text, StringComparison.Ordinal);
+    }
 }

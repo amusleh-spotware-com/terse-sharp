@@ -369,6 +369,12 @@ public static class Doctor
                 await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
                 Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
                 Guarded("memory", MemoryLine),
+                Guarded("retired", () =>
+                {
+                    var retained = WorkspaceCensus.Retained();
+
+                    return Check("retired", WorkspaceCensus.Detail(retained), retained is 0, WorkspaceCensus.Remedy);
+                }),
                 Guarded("shadow", ShadowLine),
                 await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
             ];

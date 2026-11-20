@@ -115,7 +115,7 @@ public static class ClientRegistrar
 
     private static JsonObject GuardEntry() => new()
     {
-        ["matcher"] = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash",
+        ["matcher"] = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell",
         ["hooks"] = new JsonArray(new JsonObject
         {
             ["type"] = "command",

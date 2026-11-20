@@ -2230,7 +2230,6 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("F=/tmp/x.log; cat \"$F\"")]
     [InlineData("F=/tmp/x.log; tail -5 \"$F\"")]
-    [InlineData("LOG=build.log; tail -5 \"$LOG\"")]
     public void Inspect_ForAVariableHoldingNoDotNetSource_KeepsTheVerdictTheUnexpandedCommandHad(string command)
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;

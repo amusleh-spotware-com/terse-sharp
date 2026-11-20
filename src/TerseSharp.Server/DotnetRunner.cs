@@ -76,7 +76,7 @@ public static partial class DotnetRunner
             var prepared = await PreparedAsync(workspace, expanded, cancellationToken).ConfigureAwait(false);
 
             return prepared.Failure is { } failed
-                ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked)
+                ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked, BuildFailed: true)
                 : await RanAsync(workspace, expanded, results, prepared, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -862,14 +862,15 @@ public static partial class DotnetRunner
         var report = Report(results, workspace.Root, request.Entries);
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
         var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
-        var stopped = run.TimedOut || hung.Length is not 0;
-        var response = Noted(RenderTest(run, report, request, workspace.Root, stopped || missing.Count is not 0), notes) + StaleNote(workspace, request);
+        var early = HostExit.Early(run, request.Timeout, hung);
+        var stopped = run.TimedOut || (hung.Length is not 0 && !early);
+        var response = Noted(RenderTest(run, report, request, workspace.Root, stopped || early || missing.Count is not 0), notes) + StaleNote(workspace, request);
         var verdict = await VerdictAsync(workspace.Root, Building(request, prepared, run, report), cancellationToken).ConfigureAwait(false);
+        var ended = early
+            ? HostExit.Render(response, missing, hung, run)
+            : Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung);
 
-        return new TestRunResult(
-            Verdicted(verdict, Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung)),
-            report,
-            Locked(run));
+        return new TestRunResult(Verdicted(verdict, ended), report, Locked(run), report.Total is 0 && Unbuilt(run) is not null);
     }
 
     internal static TimeSpan? HangWindow(TimeSpan timeout) =>
@@ -1427,7 +1428,7 @@ internal sealed record ProcessRun(
     string Command = "",
     long BuildMilliseconds = 0);
 
-internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
+internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked, bool BuildFailed = false);
 
 public readonly record struct BuildRun(string Response, bool Locked);
 

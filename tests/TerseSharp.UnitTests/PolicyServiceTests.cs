@@ -590,4 +590,26 @@ public sealed class PolicyServiceTests
         Assert.Equal(kept, Assert.Single(scoped));
         Assert.Equal(kept, Assert.Single(unscoped));
     }
+
+    [Fact]
+    public void Inspect_ForALargeFileWhoseLargeFileSmellIsNotAmongTheNamedThree_StillNamesTheNewFileExitInTheFixLine()
+    {
+        var brain = CodeHealthTests.BrainMethod();
+        var method = brain["class Sample\n{\n".Length..^"}\n".Length];
+        var methods = string.Concat(Enumerable.Range(0, 3).Select(index => method.Replace("int Brain(", string.Create(CultureInfo.InvariantCulture, $"int Brain{index}("), StringComparison.Ordinal)));
+        var fields = string.Join('\n', Enumerable.Range(0, 1001).Select(index => string.Create(CultureInfo.InvariantCulture, $"int field{index};")));
+
+        var finding = Assert.Single(Findings(PolicyRule.CodeHealth, "class Sample\n{\n" + fields + "\n" + methods + "}\n"));
+
+        Assert.DoesNotContain("Large File", finding.Measured, StringComparison.Ordinal);
+        Assert.EndsWith("; the file carries Large File, which no addition to it can clear - put the new members in a new file, a partial of the type when they need its private members", finding.Explain(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAnUnhealthyFileUnderAThousandLines_KeepsTheFixLineWithoutTheNewFileExit()
+    {
+        var finding = Assert.Single(Findings(PolicyRule.CodeHealth, CodeHealthTests.BrainMethod()));
+
+        Assert.EndsWith(PolicyRules.Of(PolicyRule.CodeHealth).Remedy, finding.Explain(), StringComparison.Ordinal);
+    }
 }

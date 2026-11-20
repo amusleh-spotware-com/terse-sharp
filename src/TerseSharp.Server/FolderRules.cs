@@ -217,9 +217,6 @@ public static class FolderRules
         }
     }
 
-    public static Task<int> SettleAsync(TextReader input, CancellationToken cancellationToken) =>
-        SettleAsync(input, ClientRegistrar.Home(), cancellationToken);
-
     internal static async Task<int> SettleAsync(TextReader input, string home, CancellationToken cancellationToken)
     {
         Settle(await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false), home);

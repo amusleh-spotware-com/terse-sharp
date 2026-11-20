@@ -254,6 +254,7 @@ public sealed class LoadedWorkspace : IDisposable
     public void Dispose()
     {
         watcher.Dispose();
+        WorkspaceCensus.Retired(this);
 
         if (Retire())
             Shutdown();

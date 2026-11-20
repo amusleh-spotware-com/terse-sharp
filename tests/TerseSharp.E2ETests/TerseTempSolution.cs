@@ -62,7 +62,7 @@ internal sealed class TerseTempSolution : IAsyncDisposable
         return watch ? common : [.. common, "--no-watch"];
     }
 
-    private static void Copy(string source, string destination)
+    internal static void Copy(string source, string destination)
     {
         Directory.CreateDirectory(destination);
 

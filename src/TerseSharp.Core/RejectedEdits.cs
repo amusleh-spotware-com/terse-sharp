@@ -11,7 +11,9 @@ public sealed record RejectedEdit(
     IReadOnlyList<string> Usings,
     bool Rename = false,
     MemberPlacement? Placement = null,
-    IReadOnlyList<FileService.TextEdit>? Edits = null);
+    IReadOnlyList<FileService.TextEdit>? Edits = null,
+    IReadOnlyList<bool>? Forced = null,
+    bool Overwrite = false);
 
 public readonly record struct TokenOrigin(string? Tool, int Newest, bool Issued);
 
@@ -39,7 +41,9 @@ public static class RejectedEdits
         IReadOnlyList<string>? usings = null,
         bool rename = false,
         MemberPlacement? placement = null,
-        IReadOnlyList<FileService.TextEdit>? edits = null)
+        IReadOnlyList<FileService.TextEdit>? edits = null,
+        IReadOnlyList<bool>? forced = null,
+        bool overwrite = false)
     {
         lock (Gate)
         {
@@ -47,7 +51,7 @@ public static class RejectedEdits
             var token = "r" + issued.ToString(CultureInfo.InvariantCulture);
 
             Issuers[issued % Remembered] = tool;
-            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads, add ?? [], addTo, usings ?? [], rename, placement, edits));
+            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads, add ?? [], addTo, usings ?? [], rename, placement, edits, forced, overwrite));
 
             while (Held.Count > Capacity)
                 Held.Dequeue();

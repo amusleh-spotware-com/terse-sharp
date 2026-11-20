@@ -72,7 +72,24 @@ public sealed class GuardEntryE2ETests : IDisposable
 
         start.Environment["TERSE_UPDATE"] = "0";
         start.Environment["TERSE_GUARD_LOG"] = string.Empty;
+        start.Environment["TERSE_HOME"] = sandbox;
 
         return start;
+    }
+
+    [Theory]
+    [InlineData("abc", true)]
+    [InlineData("test", false)]
+    public async Task GuardPostBatch_AfterOneTerseRead_NudgesOnlyTheNudgeArmSessionAndLogsBoth(string sessionId, bool nudged)
+    {
+        var run = await GuardAsync(
+            $$"""{"hook_event_name":"PostToolBatch","session_id":"{{sessionId}}","tool_calls":[{"tool_name":"mcp__terse-sharp__read_text","tool_use_id":"toolu_e2e"}]}""",
+            "guard",
+            "--post-batch");
+        var logged = await File.ReadAllLinesAsync(Path.Combine(sandbox, ".terse", "batch-nudge.log"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(nudged, run.Output.Contains("That response carried ONE read-only terse call.", StringComparison.Ordinal));
+        Assert.EndsWith(" " + sessionId + " toolu_e2e " + (nudged ? "nudged" : "held"), Assert.Single(logged), StringComparison.Ordinal);
     }
 }

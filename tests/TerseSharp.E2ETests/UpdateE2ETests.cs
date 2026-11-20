@@ -106,7 +106,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
         var settings = await RewrittenAsync(SettingsFile, StaleGuard);
 
         Assert.Contains("get_file_outline", skill, StringComparison.Ordinal);
-        Assert.Contains("Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash", settings, StringComparison.Ordinal);
+        Assert.Contains("Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell", settings, StringComparison.Ordinal);
         Assert.Contains("terse guard", settings, StringComparison.Ordinal);
     }
 

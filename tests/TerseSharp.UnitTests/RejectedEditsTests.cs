@@ -58,4 +58,20 @@ public sealed class RejectedEditsTests
 
         Assert.DoesNotContain("retryWith=", answer, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Carried_ForAWriteWithForceAndOverwrite_HoldsBothBesideTheContent()
+    {
+        var direct = RejectedEdits.Recall(RejectedEdits.Remember("root", "write_text", ["a.cs", "b.md"], ["class A;", "b"], forced: [true, false], overwrite: true));
+        var refusal = Errors.Invalid(FileService.UnforcedRefusal + "a.cs, b.cs", "pass force=true");
+        var answer = EditTools.Carried(Result.Fail<string>(refusal), new EditTools.Carry("write_text", ["a.cs", "b.cs"], ["class A;", "class B;"], Forced: [false, true], Overwrite: true), "root");
+        var carried = RejectedEdits.Recall(answer.Split('\n')[^1]["retryWith=".Length..]);
+
+        Assert.NotNull(direct);
+        Assert.Equal([true, false], direct!.Forced!);
+        Assert.True(direct.Overwrite);
+        Assert.NotNull(carried);
+        Assert.Equal([false, true], carried!.Forced!);
+        Assert.True(carried.Overwrite);
+    }
 }

@@ -216,9 +216,25 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         if (symbolIds is { Length: > 0 })
             return UsagesOfManyAsync(Requested(symbolId ?? symbol, symbolIds), workspace, new UsageQuery(maxResults, containers, impact, tests, half), cancellationToken);
 
-        return context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
-            ? ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
-            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken, half), cancellationToken), cancellationToken);
+        var requested = symbolId ?? symbol;
+
+        return context.WithSymbolAsync(
+            workspace,
+            requested,
+            (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
+                ? ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
+                : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken, half), cancellationToken),
+            cancellationToken,
+            unresolved: (loaded, error) => impact
+                ? Task.FromResult(error.Render())
+                : SiblingSolutions.NotedAsync(
+                    loaded,
+                    ReferenceService.OverloadsOrRefusalAsync(
+                        loaded,
+                        new SourceService.AmbiguousRead(requested!, error, null),
+                        overload => ReferenceService.FindUsagesAsync(loaded, overload, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken, half),
+                        cancellationToken),
+                    cancellationToken));
     }
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
@@ -260,7 +276,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             SiblingSolutions.NotedAsync(loaded, ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics", ReadOnly = true)]
-    [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those - but applies their DiagnosticSuppressors, as the compiler does. A line folds every position sharing an id and a message, and when it folded any the answer also counts occurrences=N errors=N warnings=N - comparable to an edit's errors= counter when the two cover the same projects. baseRef=HEAD keeps only the diagnostics on lines this working tree ADDED or CHANGED against that ref and folds the rest to one pre-existing count, so a convergence read shows your own errors and not the repository's; a baseRef call always runs.")]
+    [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those - but applies their DiagnosticSuppressors, as the compiler does. A line folds every position sharing an id and a message, and when it folded any the answer also counts occurrences=N errors=N warnings=N - comparable to an edit's errors= counter when the two cover the same projects. baseRef=HEAD keeps only the diagnostics on lines this working tree ADDED or CHANGED against that ref and folds the rest to one pre-existing count, so a convergence read shows your own errors and not the repository's.")]
     public Task<string> GetDiagnostics(
             [Description("File to scope to.")] string? path = null,
             [Description("Minimum severity: error, warning, info. Default warning.")] string? minSeverity = null,
@@ -273,8 +289,8 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             ? Task.FromResult(clash)
             : replay.ReplayedAsync(
                 "get_diagnostics",
-                ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture), baseRef),
-                force: baseRef is { Length: > 0 },
+                ReplayGate.GitKeyed(ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture), baseRef),
+                baseRef, false), force: false,
                 () => context.WithWorkspaceAsync(workspace, path, async loaded =>
                 {
                     var (touched, error) = await AnalysisTools.TouchedAsync(loaded.Root, baseRef, cancellationToken).ConfigureAwait(false);

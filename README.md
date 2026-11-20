@@ -188,7 +188,7 @@ the consumer you broke elsewhere in the solution.
 ## 🛡️ Stays on the rails
 
 - **The guard.** `terse install --guard` adds a hook that blocks `Read`, `Grep`, `cat` and
-  `dotnet build` on C#, and hands the agent the exact TerseSharp call to make instead.
+  `dotnet build` on C# - in `Bash` and `PowerShell` alike - and hands the agent the exact TerseSharp call to make instead.
 - **Folder rules.** Nested `CLAUDE.md` files reach the agent the first time it touches that folder.
 - **Read-only mode.** `terse serve --read-only` makes every write refuse.
 - **The right solution.** With several in one folder, the one named for your OS loads first

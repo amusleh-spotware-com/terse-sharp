@@ -205,10 +205,10 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier, or an exported upper-case path like `$APPDATA`, is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched (`git branch -a | head -40`). A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier, or an exported upper-case path like `$APPDATA`, is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source; a `$VAR` nothing assigns counts as in the tree. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched (`git branch -a | head -40`). A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
-denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again, in
+denies the call, names the tool that replaces it, and tells you not to run it in `Bash` or `PowerShell` again, in
 any spelling.
 **The denial also hands you the answer**: a system reminder beside the tool result reads
 `Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
@@ -398,7 +398,7 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call (`NOTE <tool> UNCHANGED` under the repeated payload; `reload=true`, `sinceLast=true` or any other argument re-runs; a `PARTIAL` answer never replays). A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `list_tests` or `clean` call inside one session answers `repeat #N of this exact call ...` - the answer you already have. Banned: a full-suite run between two edits of one
+A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call (`NOTE <tool> UNCHANGED` under the repeated payload; `reload=true`, `sinceLast=true` or any other argument re-runs; a `PARTIAL` answer never replays). A call carrying `baseRef=` replays only while HEAD, the index and that ref's commit are unchanged too. A byte-identical `build`, `run_tests`, `list_tests` or `clean` call inside one session answers `repeat #N of this exact call ...` - the answer you already have. Banned: a full-suite run between two edits of one
 slice · re-issuing an identical `build` or `run_tests` with nothing written since - a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out; a repeat that re-runs anyway ends `NOTE re-ran: stamp moved <what> a->b`. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
@@ -669,7 +669,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    every tool taking a `symbolId` accepts that, the full documentation id
    (`M:Trading.OrderService.Submit(Trading.Order)`; one typed with `(string)`, or with no parameter list for a lone overload, resolves by name and says `resolved from name:`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
-   guess**; a read answers ≤5 overloads of one member whole. Constructors, operators, indexers, generics and explicit interface implementations keep
+   guess**; a read answers ≤5 overloads of one member whole, `find_usages` too. Constructors, operators, indexers, generics and explicit interface implementations keep
    their documentation id in outlines, because a name cannot address them. `Type.#ctor` and `Type..ctor` address constructors; a primary one answers its type header. Every one of those tools
    also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
    required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
