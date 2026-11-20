@@ -223,10 +223,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             {
                 var replayScope = Scoped(configuration, targetFramework, properties);
 
-                return UnbuiltReplay.Refused(tests, exclude) is { } refusal
+                return UnbuiltReplay.Refused(tests, exclude, noBuild) is { } refusal
                     ? Task.FromResult(refusal)
                     : replayScope.IsOk
-                        ? Noted(RunAsync(target, UnbuiltReplay.Request(memory, noBuild, Seconds(timeoutSeconds), verbose, replayScope.Value), stopping), UnbuiltReplay.Note)
+                        ? Noted(RunAsync(target, UnbuiltReplay.Request(memory, Seconds(timeoutSeconds), verbose, replayScope.Value), stopping), UnbuiltReplay.Note)
                         : Task.FromResult(replayScope.Error!.Render());
             }
 

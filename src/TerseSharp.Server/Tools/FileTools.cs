@@ -1441,7 +1441,7 @@ context.RejectWrite() is { } rejection
     {
         var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
         var content = WriteRetry.WithUsings(supplied is { Length: > 0 } ? supplied : Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
-        var replay = options with { Force = options.Force || (path is not { Length: > 0 } && held.Forced is [true, ..]), Overwrite = options.Overwrite || held.Overwrite };
+        var replay = options with { Force = HeldWrite.Force(options.Force, path, held), Overwrite = HeldWrite.Overwrite(options.Overwrite, path, held) };
 
         if (target.Length is 0)
             return Task.FromResult(Errors.Blank("path").Render());

@@ -27,7 +27,9 @@ internal static class NudgeHoldOut
         try
         {
             var directory = Directory.CreateDirectory(Path.Combine(home, ".terse"));
-            await File.AppendAllTextAsync(Path.Combine(directory.FullName, LogFileName), Line(verdict), cancellationToken).ConfigureAwait(false);
+            await using var stream = new FileStream(Path.Combine(directory.FullName, LogFileName), FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, FileOptions.Asynchronous);
+
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(Line(verdict)), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

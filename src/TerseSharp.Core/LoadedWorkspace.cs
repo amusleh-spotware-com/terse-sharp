@@ -254,7 +254,6 @@ public sealed class LoadedWorkspace : IDisposable
     public void Dispose()
     {
         watcher.Dispose();
-        WorkspaceCensus.Retired(this);
 
         if (Retire())
             Shutdown();
@@ -444,6 +443,7 @@ public sealed class LoadedWorkspace : IDisposable
 
     private void Shutdown()
     {
+        WorkspaceCensus.Retired(this);
         RazorGeneratedMap.Forget(Solution.ProjectIds);
         workspace.Dispose();
         Solution = workspace.CurrentSolution;

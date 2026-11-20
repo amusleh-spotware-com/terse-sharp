@@ -10,7 +10,7 @@ public sealed class UnbuiltReplayTests
     {
         var memory = new TestRunMemory("C:\\repo", "C:\\repo\\All.slnx", [], new BuildScope("Release", null, null), Unbuilt: new UnbuiltRun("FullyQualifiedName~Ns.A", ["A.Tests.csproj"]));
 
-        var request = UnbuiltReplay.Request(memory, noBuild: false, TimeSpan.FromSeconds(600), verbose: false, default);
+        var request = UnbuiltReplay.Request(memory, TimeSpan.FromSeconds(600), verbose: false, default);
 
         Assert.Equal("C:\\repo\\All.slnx", request.Target);
         Assert.Equal("FullyQualifiedName~Ns.A", request.Filter);
@@ -22,8 +22,9 @@ public sealed class UnbuiltReplayTests
     [Fact]
     public void Refused_WithTestsNamed_RefusesNamingWhyAndPassesWithoutThem()
     {
-        Assert.Contains("failed to build", UnbuiltReplay.Refused(["Ns.A"], null), StringComparison.Ordinal);
-        Assert.Contains("remedy:", UnbuiltReplay.Refused(null, ["Ns.A"]), StringComparison.Ordinal);
-        Assert.Null(UnbuiltReplay.Refused(null, []));
+        Assert.Contains("failed to build", UnbuiltReplay.Refused(["Ns.A"], null, noBuild: false), StringComparison.Ordinal);
+        Assert.Contains("remedy:", UnbuiltReplay.Refused(null, ["Ns.A"], noBuild: false), StringComparison.Ordinal);
+        Assert.Contains("false one", UnbuiltReplay.Refused(null, [], noBuild: true), StringComparison.Ordinal);
+        Assert.Null(UnbuiltReplay.Refused(null, [], noBuild: false));
     }
 }

@@ -88,7 +88,6 @@ public sealed class PowerShellGuardTests
         Assert.False(PowerShell(command).Denied, command);
 
     [Theory]
-    [InlineData("Get-Content src/App/OrderService.cs | ForEach-Object { \"`t$_\" }")]
     [InlineData("@'\nGet-Content src/App/OrderService.cs\n'@ | Set-Content notes.txt")]
     [InlineData("<# Get-Content src/App/OrderService.cs #> Get-Date")]
     public void Inspect_ForPowerShellTheGuardCannotParseSoundly_AllowsIt(string command) =>
@@ -121,6 +120,52 @@ public sealed class PowerShellGuardTests
         var entries = ClientRegistrar.Guarded([], folderRules: false)["hooks"]!["PreToolUse"]!.AsArray();
 
         Assert.Contains(entries, entry => entry?["matcher"]?.GetValue<string>() is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell");
+    }
+
+    [Theory]
+    [InlineData("Get-Content src/App/OrderService.cs | ForEach-Object { \"`t$_\" }")]
+    [InlineData("Get-Content src/App/OrderService.cs; Write-Output \"`n\"")]
+    [InlineData("Get-Content `\nsrc/App/OrderService.cs")]
+    [InlineData("Get-Content -Path src/App/OrderService.cs")]
+    public void Inspect_ForAPowerShellGetContentOfACSharpFileBesideABacktickEscape_DeniesIt(string command) =>
+        Assert.True(PowerShell(command).Denied, command);
+
+    [Fact]
+    public async Task Inspect_ForAPowerShellSetLocationIntoTheTreeThenGetContent_DeniesIt()
+    {
+        var tree = await TreeAsync();
+        var outside = Directory.CreateTempSubdirectory("terse-ps-cwd");
+
+        try
+        {
+            var verdict = PowerShell("Set-Location " + tree.FullName.Replace('\\', '/') + "; Get-Content README.md", outside.FullName);
+
+            Assert.True(verdict.Denied, verdict.Reason);
+        }
+        finally
+        {
+            tree.Delete(true);
+            outside.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task Inspect_ForAPowerShellSetLocationOutOfTheTreeThenGetContent_AllowsIt()
+    {
+        var tree = await TreeAsync();
+        var outside = Directory.CreateTempSubdirectory("terse-ps-away");
+
+        try
+        {
+            var verdict = PowerShell("Set-Location " + outside.FullName.Replace('\\', '/') + "; Get-Content build.log", tree.FullName);
+
+            Assert.False(verdict.Denied, verdict.Reason);
+        }
+        finally
+        {
+            tree.Delete(true);
+            outside.Delete(true);
+        }
     }
 
     private static GuardVerdict PowerShell(string command, string? cwd = null) =>
