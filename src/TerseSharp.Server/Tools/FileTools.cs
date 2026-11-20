@@ -204,7 +204,7 @@ bool verbose) =>
         {
             return context.RejectWrite() is { } rejection
                 ? Task.FromResult(rejection)
-                : ToolBoundary.RunAsync(() => UnwrappedAsync(FileService.WriteUnboundAsync(path, content, options.DryRun, options.Force, options.Verbose, cancellationToken)));
+                : ToolBoundary.RunAsync(() => UnwrappedAsync(FileService.WriteUnboundAsync(path, content, options.DryRun, options.Force, options.Verbose, options.AllowPolicy, cancellationToken)));
         }
 
         return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
@@ -233,7 +233,7 @@ bool verbose) =>
         [Description("Markdown only: replace this whole section, e.g. '## Commands', no oldText needed.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Edit a .cs file no project compiles.")] bool force = false,
-        [Description("Write a .cs edit raw even if it breaks the build. Default false.")] bool allowErrors = false,
+        [Description("Write a .cs edit even if it breaks the build.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("1-based index of the match to replace when it repeats - the oldText match, or beside section= that heading. Default 0 requires one.")] int occurrence = 0,
@@ -247,13 +247,14 @@ bool verbose) =>
         [Description(StaleHelp)] string? ifUnchangedSince = null,
         [Description("Token a rolled-back .cs edit printed; replays its held edits.")] string? retryWith = null,
         [Description("Namespaces added to each edited .cs file, as for a CS0246 rollback.")] string[]? usings = null,
+        [Description("Override a policy reject.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default)
     {
         if (retryWith is { Length: > 0 } token)
         {
             return Bounded(context) is { } bounded
                 ? Task.FromResult(bounded.Render())
-                : Reedited(token, workspace, usings, new FileService.EditRequest(string.Empty, string.Empty, null, dryRun, true, verbose, Context: context, AllowErrors: allowErrors), cancellationToken);
+                : Reedited(token, workspace, usings, new FileService.EditRequest(string.Empty, string.Empty, null, dryRun, true, verbose, Context: context, AllowErrors: allowErrors, AllowPolicy: allowPolicy), cancellationToken);
         }
 
         var anchor = Anchor(path, edits);
@@ -274,7 +275,7 @@ bool verbose) =>
             loaded => Raced(loaded, targets, ifUnchangedSince) ?? EditedAsync(
                 loaded,
                 path ?? target,
-                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll, allowErrors, usings),
+                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll, allowErrors, usings, allowPolicy),
                 newText,
                 edits,
                 rows,

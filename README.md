@@ -171,7 +171,8 @@ A `policy` section in `.terse.json` checks every edit against your team's rules.
 | `TERSE114` code health (`analyze` adds history: congestion, change coupling) | 9 |
 
 Every rule can be `reject`, `warn` or `off`, and every rule that is on by default warns rather than rejects. Only what an edit
-**introduces** counts, so an old file never blocks a clean change. `allowPolicy=true` pushes one edit
+**introduces** counts, so an old file never blocks a clean change. The rules hold on every C# write, including a
+`force=true` write to a file no project compiles and an `allowErrors=true` text edit. `allowPolicy=true` pushes one edit
 through and names each rule it skipped. Most limits copy ReSharper's own defaults.
 
 ### One call for the whole quality gate

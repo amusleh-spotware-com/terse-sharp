@@ -16,4 +16,22 @@ public sealed record PolicyVerdict(
     public bool Blocks => !Rejected.IsEmpty && (!Overridden || !AllowOverride);
 
     public bool Bypassed => !Rejected.IsEmpty && Overridden && AllowOverride;
+
+    public PolicyVerdict Joined(PolicyVerdict other) =>
+        new([.. Rejected, .. other.Rejected], [.. Warned, .. other.Warned], AllowOverride && other.AllowOverride, Overridden, Notice ?? other.Notice);
+
+    public IEnumerable<string> Lines(bool dryRun)
+    {
+        if (Notice is { } notice)
+            yield return "WARNING " + notice;
+
+        foreach (var finding in Warned)
+            yield return string.Create(CultureInfo.InvariantCulture, $"WARNING policy  {finding.Render()}");
+
+        foreach (var finding in Bypassed ? Rejected : [])
+            yield return string.Create(CultureInfo.InvariantCulture, $"WARNING policy overridden  {finding.Render()}");
+
+        foreach (var finding in dryRun && Blocks ? Rejected : [])
+            yield return string.Create(CultureInfo.InvariantCulture, $"WARNING would be rolled back by policy  {finding.Explain()}");
+    }
 }

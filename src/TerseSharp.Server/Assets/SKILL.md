@@ -909,10 +909,9 @@ fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
 
 **`allowPolicy=true` is the escape hatch and is never silent.** Every tool whose edit reaches the gate
 takes it - `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`,
-`write_text`, `extract_interface`, `move_type_to_file`, `move_type_to_namespace` and
-`change_signature`; the edit lands and the
-response carries `WARNING policy overridden` naming every rule bypassed. A project setting
-`"allowOverride": false` refuses it. A rejection also names a `retryWith` token holding your
+`write_text`, `edit_text`, `extract_interface`, `move_type_to_file`, `move_type_to_namespace` and
+`change_signature`; the edit lands with `WARNING policy overridden` naming every rule bypassed.
+`"allowOverride": false` refuses it. `force`/`allowErrors` skip the compile gate, not policy. A rejection also names a `retryWith` token holding your
 declaration, so the corrected retry costs a token, not the payload.
 
 ```json

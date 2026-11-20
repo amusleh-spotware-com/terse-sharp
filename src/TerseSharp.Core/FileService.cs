@@ -76,7 +76,7 @@ public static class FileService
 
         return workspace.Contains(full)
             ? await InsideAsync(workspace, path, full, content, write, cancellationToken).ConfigureAwait(false)
-            : await OutsideWriteAsync(workspace, full, content, write.DryRun, write.Verbose, cancellationToken).ConfigureAwait(false);
+            : await OutsideWriteAsync(workspace, full, content, write, cancellationToken).ConfigureAwait(false);
     }
 
     private readonly record struct TextWrite(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy, bool Overwrite, bool Restored);
@@ -177,12 +177,15 @@ public static class FileService
         if (await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false) is { } gated)
             return Annotated(gated, notes, before, after, request.Context);
 
-        var inside = workspace.Contains(full);
+        var policy = await PolicedAsync(workspace.Root, [new PolicySource(full, before, after)], request.DryRun, request.AllowPolicy, cancellationToken).ConfigureAwait(false);
+
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
 
         if (!request.DryRun && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
             return Result.Fail<string>(overtaken);
 
-        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, inside ? null : full, notes, request.Context));
+        return Result.Ok(Policed(policy.Value!, request.DryRun, DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, workspace.Contains(full) ? null : full, notes, request.Context)));
     }
 
     private static Task StoredAsync(LoadedWorkspace workspace, string full, string content, bool inside, CancellationToken cancellationToken) =>
@@ -199,6 +202,23 @@ public static class FileService
 
         return null;
     }
+
+    private static async Task<Result<PolicyVerdict>> PolicedAsync(string? root, IReadOnlyList<PolicySource> sources, bool dryRun, bool allowPolicy, CancellationToken cancellationToken)
+    {
+        var verdict = await TextPolicyGate.EvaluateAsync(root, sources, allowPolicy, cancellationToken).ConfigureAwait(false);
+
+        return !dryRun && verdict.Blocks ? Result.Fail<PolicyVerdict>(Errors.PolicyViolation(verdict)) : Result.Ok(verdict);
+    }
+
+    private static string Policed(PolicyVerdict verdict, bool dryRun, string response) =>
+        verdict is { Notice: null, Warned.IsEmpty: true, Rejected.IsEmpty: true }
+            ? response
+            : string.Join('\n', [.. verdict.Lines(dryRun), response]);
+
+    private static PolicySource[] Unpoliced(List<(string Path, Result<BatchEdit> Rewrite)> rewrites, List<PendingWrite> gated) =>
+            [.. rewrites
+            .Where(entry => entry.Rewrite.IsOk && !gated.Exists(write => string.Equals(write.Full, entry.Rewrite.Value.Write.Full, StringComparison.Ordinal)))
+            .Select(entry => new PolicySource(entry.Rewrite.Value.Write.Full, entry.Rewrite.Value.Write.Before, entry.Rewrite.Value.Write.After))];
 
     private static async Task<string> OnDiskAsync(string full, CancellationToken cancellationToken) =>
         File.Exists(full) ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
@@ -470,7 +490,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false, IReadOnlyList<string>? Usings = null)
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false, IReadOnlyList<string>? Usings = null, bool AllowPolicy = false)
     {
         public IReadOnlyDictionary<string, HashSet<string>>? Unneeded { get; init; }
     }
@@ -842,11 +862,16 @@ public static class FileService
         if (groups.Count > 1 && await UnneededAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false) is { Count: > 0 } unneeded)
             (rewrites, pending) = await RewritesAsync(workspace, groups, request with { Unneeded = unneeded }, cancellationToken).ConfigureAwait(false);
 
+        var policy = await PolicedAsync(workspace.Root, Unpoliced(rewrites, request.AllowErrors ? [] : pending), request.DryRun, request.AllowPolicy, cancellationToken).ConfigureAwait(false);
+
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
+
         var gated = await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false);
 
         return gated is { IsOk: false }
             ? gated.Value
-            : Result.Ok(await AnsweredAsync(workspace, rewrites, gated is null ? [] : pending, gated, cancellationToken).ConfigureAwait(false));
+            : Result.Ok(Policed(policy.Value!, request.DryRun, await AnsweredAsync(workspace, rewrites, gated is null ? [] : pending, gated, cancellationToken).ConfigureAwait(false)));
     }
 
     private static async Task<(List<(string Path, Result<BatchEdit> Rewrite)> Rewrites, List<PendingWrite> Pending)> RewritesAsync(
@@ -965,6 +990,11 @@ public static class FileService
             pending.Add(prepared.Value);
         }
 
+        var policy = await PolicedAsync(workspace.Root, [.. pending.Where(entry => entry.Document is null).Select(entry => new PolicySource(entry.Full, entry.Before, entry.After))], dryRun, allowPolicy, cancellationToken).ConfigureAwait(false);
+
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
+
         var gated = await GateManyAsync(workspace, pending, new EditOptions("write_text", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken).ConfigureAwait(false);
 
         if (gated is { IsOk: false })
@@ -990,7 +1020,7 @@ public static class FileService
             rendered.Add(entry.Ending is { } ending ? entry.Path + "  " + ending : string.Empty);
         }
 
-        return Result.Ok(Tallied(rendered, refused, pending.Count));
+        return Result.Ok(Policed(policy.Value!, dryRun, Tallied(rendered, refused, pending.Count)));
     }
 
     private static async Task<string> PlainAsync(
@@ -1502,26 +1532,34 @@ public static class FileService
         if (await GatedAsync(workspace, path, full, after, write.DryRun, write.AllowErrors, write.Verbose, write.AllowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet), ending)) : gated;
 
+        var policy = await PolicedAsync(workspace.Root, [new PolicySource(full, before, after)], write.DryRun, write.AllowPolicy, cancellationToken).ConfigureAwait(false);
+
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
+
         if (!write.DryRun && !string.Equals(before, after, StringComparison.Ordinal) && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
             return Result.Fail<string>(overtaken);
 
-        return Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, write.DryRun, write.Verbose), dropped), before, after, quiet), ending));
+        return Result.Ok(Policed(policy.Value!, write.DryRun, DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, write.DryRun, write.Verbose), dropped), before, after, quiet), ending)));
     }
 
     private static async Task<Result<string>> OutsideWriteAsync(
             LoadedWorkspace workspace,
             string full,
             string content,
-            bool dryRun,
-            bool verbose,
+            TextWrite write,
             CancellationToken cancellationToken)
     {
         var (before, after, ending) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+        var policy = await PolicedAsync(workspace.Root, [new PolicySource(full, before, after)], write.DryRun, write.AllowPolicy, cancellationToken).ConfigureAwait(false);
 
-        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal) && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
+
+        if (!write.DryRun && !string.Equals(before, after, StringComparison.Ordinal) && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
             return Result.Fail<string>(overtaken);
 
-        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
+        return Result.Ok(Policed(policy.Value!, write.DryRun, DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, write.DryRun, write.Verbose, full), ending)));
     }
 
     private static void AppendSections(ResponseBuilder response, string path, string text, ReadRequest request, LineSelection selection)
@@ -2433,7 +2471,7 @@ public static class FileService
     private static async Task<Result<string>?> CompileGatedAsync(LoadedWorkspace workspace, List<PendingWrite> pending, EditRequest request, CancellationToken cancellationToken) =>
         request.AllowErrors || pending.Count is 0
             ? null
-            : await GateManyAsync(workspace, pending, new EditOptions("edit_text", request.DryRun, false, request.Verbose, AllowPolicy: true), cancellationToken).ConfigureAwait(false);
+            : await GateManyAsync(workspace, pending, new EditOptions("edit_text", request.DryRun, false, request.Verbose, AllowPolicy: request.AllowPolicy), cancellationToken).ConfigureAwait(false);
 
     private static Result<string> Annotated(Result<string> gated, IReadOnlyList<string> notes, string before, string after, int context)
     {
@@ -2540,22 +2578,33 @@ public static class FileService
             : string.Create(CultureInfo.InvariantCulture, $"NOTE oldText started inside the indentation of line {line} (the file indents it {anchor + columns} column(s), oldText {anchor}), so the match was widened to the whole line; newText already carried the file's depth and landed as sent");
     }
 
-    public static async Task<Result<string>> WriteUnboundAsync(string path, string content, bool dryRun, bool force, bool verbose, CancellationToken cancellationToken)
+    public static async Task<Result<string>> WriteUnboundAsync(string path, string content, bool dryRun, bool force, bool verbose, bool allowPolicy, CancellationToken cancellationToken)
     {
         var full = Path.GetFullPath(path);
 
         if (!force)
             return Result.Fail<string>(Errors.OutsideWrite(full));
 
+        var (before, after, ending) = await UnboundAsync(full, content, cancellationToken).ConfigureAwait(false);
+        var policy = await PolicedAsync(null, [new PolicySource(full, before, after)], dryRun, allowPolicy, cancellationToken).ConfigureAwait(false);
+
+        if (!policy.IsOk)
+            return Result.Fail<string>(policy.Error!);
+
+        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
+            await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(Policed(policy.Value!, dryRun, DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending)));
+    }
+
+    private static async Task<(string Before, string After, string? Ending)> UnboundAsync(string full, string content, CancellationToken cancellationToken)
+    {
         var exists = File.Exists(full);
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
         var adopted = LineEndings.Adopt(content, LineEndings.Dominant(exists ? before : content));
         var (after, ending) = await FileEnding.KeptAsync(full, exists, before, adopted, cancellationToken).ConfigureAwait(false);
 
-        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
-            await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
-
-        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
+        return (before, after, ending);
     }
 
     private static System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DocumentId> LinkedIds(Microsoft.CodeAnalysis.Solution solution, Microsoft.CodeAnalysis.DocumentId id) =>

@@ -235,6 +235,119 @@ public sealed class PolicyE2ETests : IAsyncLifetime
         }
     }
 
+    private const string LooseProbe = "loose/LooseProbe.cs";
+    private const string ConformingProbe = "namespace Fixture.Policy;\n\npublic sealed class LooseProbe\n{\n    public int Count()\n    {\n        return 1;\n    }\n}\n";
+    private const string CommentedProbe = "namespace Fixture.Policy;\n\npublic sealed class LooseProbe\n{\n    public int Count()\n    {\n        // the running count\n        return 1;\n    }\n}\n";
+    private static readonly string LooseDirectory = Path.Combine(PolicyRoot, "loose");
+    private static readonly string LoosePath = Path.Combine(LooseDirectory, "LooseProbe.cs");
+
+    [Fact]
+    public async Task WriteText_WithForceOnACsFileNoProjectCompiles_RefusesContentThePolicyRejectsUnlessAllowPolicyIsPassed()
+    {
+        try
+        {
+            var rejected = await WrittenAsync(LooseProbe, CommentedProbe, allowPolicy: false);
+            var writtenOnRejection = File.Exists(LoosePath);
+            var applied = await WrittenAsync(LooseProbe, CommentedProbe, allowPolicy: true);
+
+            Assert.Contains("ERROR PolicyViolation", rejected, StringComparison.Ordinal);
+            Assert.Contains("TERSE112", rejected, StringComparison.Ordinal);
+            Assert.False(writtenOnRejection);
+            Assert.Contains("WARNING policy overridden  TERSE112", applied, StringComparison.Ordinal);
+            Assert.Contains("// the running count", await File.ReadAllTextAsync(LoosePath, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteLooseDirectory();
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithForceOnACsFileNoProjectCompiles_RefusesAnEditThatAddsARejectedComment()
+    {
+        try
+        {
+            Assert.DoesNotContain("ERROR", await WrittenAsync(LooseProbe, ConformingProbe, allowPolicy: false), StringComparison.Ordinal);
+            var before = await File.ReadAllTextAsync(LoosePath, TestContext.Current.CancellationToken);
+
+            var preview = await CommentedEditAsync(LooseProbe, new() { ["force"] = true, ["dryRun"] = true });
+            var rejected = await CommentedEditAsync(LooseProbe, new() { ["force"] = true });
+
+            Assert.Contains("WARNING would be rolled back by policy  TERSE112", preview, StringComparison.Ordinal);
+            Assert.Contains("ERROR PolicyViolation", rejected, StringComparison.Ordinal);
+            Assert.Contains("TERSE112", rejected, StringComparison.Ordinal);
+            Assert.Equal(before, await File.ReadAllTextAsync(LoosePath, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            DeleteLooseDirectory();
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAllowErrorsOnACompiledFile_StillRefusesAnEditThePolicyRejects()
+    {
+        var before = await OriginalAsync();
+
+        try
+        {
+            var rejected = await CommentedLedgerEditAsync(new() { ["allowErrors"] = true });
+            var batched = await server.CallAsync(
+                "edit_text",
+                new() { ["allowErrors"] = true, ["edits"] = new[] { new Dictionary<string, object?> { ["path"] = "src/Fixture.Policy/Ledger.cs", ["oldText"] = "        var total = 0;", ["newText"] = "        // running sum\n        var total = 0;" } } },
+                TestContext.Current.CancellationToken);
+
+            Assert.Contains("ERROR PolicyViolation", rejected, StringComparison.Ordinal);
+            Assert.Contains("TERSE112", rejected, StringComparison.Ordinal);
+            Assert.Contains("ERROR PolicyViolation", batched, StringComparison.Ordinal);
+            Assert.Equal(before, await CurrentAsync());
+        }
+        finally
+        {
+            await RestoreAsync(before);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_OnACompiledFile_RefusesAPolicyViolationUnlessAllowPolicyIsPassed()
+    {
+        var before = await OriginalAsync();
+
+        try
+        {
+            var rejected = await CommentedLedgerEditAsync([]);
+            var unchanged = await CurrentAsync();
+            var applied = await CommentedLedgerEditAsync(new() { ["allowPolicy"] = true });
+
+            Assert.Contains("ERROR PolicyViolation", rejected, StringComparison.Ordinal);
+            Assert.Equal(before, unchanged);
+            Assert.Contains("WARNING policy overridden  TERSE112", applied, StringComparison.Ordinal);
+            Assert.Contains("// running sum", await CurrentAsync(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await RestoreAsync(before);
+        }
+    }
+
+    private Task<string> CommentedEditAsync(string path, Dictionary<string, object?> flags) =>
+        server.CallAsync(
+            "edit_text",
+            new(flags) { ["path"] = path, ["oldText"] = "        return 1;", ["newText"] = "        // the running count\n        return 1;" },
+            TestContext.Current.CancellationToken);
+
+    private Task<string> CommentedLedgerEditAsync(Dictionary<string, object?> flags) =>
+        server.CallAsync(
+            "edit_text",
+            new(flags) { ["path"] = "src/Fixture.Policy/Ledger.cs", ["oldText"] = "        var total = 0;", ["newText"] = "        // running sum\n        var total = 0;" },
+            TestContext.Current.CancellationToken);
+
+    private static void DeleteLooseDirectory()
+    {
+        if (Directory.Exists(LooseDirectory))
+            Directory.Delete(LooseDirectory, recursive: true);
+    }
+
     [Fact]
     public async Task Analyze_WithAnIdTheProjectPolicyEnforces_DoesNotCallItNotEnabled()
     {
@@ -288,6 +401,34 @@ public sealed class PolicyE2ETests : IAsyncLifetime
         finally
         {
             await RestoreAsync(before);
+        }
+    }
+
+    [Fact]
+    public async Task WriteAndEditBatches_OnACsFileNoProjectCompiles_RefuseAnEntryThatAddsARejectedComment()
+    {
+        try
+        {
+            var written = await server.CallAsync(
+                "write_text",
+                new() { ["files"] = new[] { new Dictionary<string, object?> { ["path"] = LooseProbe, ["content"] = CommentedProbe, ["force"] = true } } },
+                TestContext.Current.CancellationToken);
+            var writtenOnRejection = File.Exists(LoosePath);
+            await WrittenAsync(LooseProbe, ConformingProbe, allowPolicy: false);
+            var before = await File.ReadAllTextAsync(LoosePath, TestContext.Current.CancellationToken);
+            var edited = await server.CallAsync(
+                "edit_text",
+                new() { ["edits"] = new[] { new Dictionary<string, object?> { ["path"] = LooseProbe, ["oldText"] = "        return 1;", ["newText"] = "        // the running count\n        return 1;", ["force"] = true } } },
+                TestContext.Current.CancellationToken);
+
+            Assert.Contains("ERROR PolicyViolation", written, StringComparison.Ordinal);
+            Assert.False(writtenOnRejection);
+            Assert.Contains("ERROR PolicyViolation", edited, StringComparison.Ordinal);
+            Assert.Equal(before, await File.ReadAllTextAsync(LoosePath, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            DeleteLooseDirectory();
         }
     }
 }

@@ -217,6 +217,32 @@ public sealed class PolicyGateTests
         Assert.Contains("7 parameters exceeds 5", result.Error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task WriteTextAsync_ForcedOntoAFileNoProjectCompilesWhereThePolicyForbidsOverriding_RefusesTheRejectedComment()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        var outside = Path.Combine(Path.GetTempPath(), "terse-loose-" + Guid.NewGuid().ToString("N"));
+        var probe = Path.Combine(outside, "Loose.cs");
+        Directory.CreateDirectory(Path.Combine(outside, ".git"));
+        await File.WriteAllTextAsync(Path.Combine(outside, TerseConfigFile.FileName), """{"policy":{"allowOverride":false,"rules":{"comments":{"action":"reject"}}}}""", TestContext.Current.CancellationToken);
+        PolicyCache.Forget();
+
+        try
+        {
+            var result = await FileService.WriteTextAsync(workspace.Workspace, probe, "public static class Loose\n{\n    public static int One()\n    {\n        // one\n        return 1;\n    }\n}\n", false, true, true, false, true, false, TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsOk);
+            Assert.Equal(TerseErrorCode.PolicyViolation, result.Error!.Code);
+            Assert.Contains("TERSE112", result.Error.Message, StringComparison.Ordinal);
+            Assert.Contains("allowOverride=false", result.Error.Remedy, StringComparison.Ordinal);
+            Assert.False(File.Exists(probe));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
     private static PolicyFinding Finding(string measured, int line) =>
         new(PolicyRule.ParameterCount, PolicyAction.Warn, "src/Plumbing.cs", line, 5, "Plumbing.Write", measured, "5");
 
@@ -358,4 +384,26 @@ public sealed class PolicyGateTests
     [Fact]
     public void Introduced_ForTwoDocumentsOfOneFileWhoseLowestScoreDropped_ChargesItOnce() =>
         Assert.Equal(6.5, Assert.Single(PolicyGate.Introduced([Health(8.0), Health(7.0)], [Health(8.0), Health(6.5)])).Health);
+
+    [Fact]
+    public async Task WriteUnboundAsync_WithNoWorkspaceWhereThePolicyForbidsOverriding_RefusesTheRejectedComment()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "terse-unbound-" + Guid.NewGuid().ToString("N"));
+        var probe = Path.Combine(outside, "Loose.cs");
+        Directory.CreateDirectory(Path.Combine(outside, ".git"));
+        await File.WriteAllTextAsync(Path.Combine(outside, TerseConfigFile.FileName), """{"policy":{"allowOverride":false,"rules":{"comments":{"action":"reject"}}}}""", TestContext.Current.CancellationToken);
+        PolicyCache.Forget();
+
+        try
+        {
+            var result = await FileService.WriteUnboundAsync(probe, "public static class Loose\n{\n    public static int One()\n    {\n        // one\n        return 1;\n    }\n}\n", false, true, false, true, TestContext.Current.CancellationToken);
+
+            Assert.Equal(TerseErrorCode.PolicyViolation, result.Error?.Code);
+            Assert.False(File.Exists(probe));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
 }

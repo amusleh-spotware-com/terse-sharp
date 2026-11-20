@@ -601,22 +601,8 @@ public static class EditGate
 
     private static void Policy(ResponseBuilder response, PolicyVerdict policy, bool dryRun)
     {
-        if (policy.Notice is { } notice)
-            response.Line("WARNING " + notice);
-
-        foreach (var finding in policy.Warned)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING policy  {finding.Render()}"));
-
-        if (policy.Bypassed)
-        {
-            foreach (var finding in policy.Rejected)
-                response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING policy overridden  {finding.Render()}"));
-        }
-        else if (dryRun && policy.Blocks)
-        {
-            foreach (var finding in policy.Rejected)
-                response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING would be rolled back by policy  {finding.Explain()}"));
-        }
+        foreach (var line in policy.Lines(dryRun))
+            response.Line(line);
     }
 
     private static string[]? Collided(string[] errors, ImmutableArray<string> usings)

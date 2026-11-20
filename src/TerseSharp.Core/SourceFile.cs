@@ -21,7 +21,7 @@ public static class SourceFile
     public static bool IsCSharp(ReadOnlySpan<char> path) =>
         Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase);
 
-    private const string UncompiledRemedy = "no symbol tool can address a file no loaded project compiles: pass force=true to edit it as plain text - nothing compiles it, so nothing gates it - or load_workspace the solution whose project compiles it and edit it there with replace_symbol_body, replace_symbol or add_member";
+    private const string UncompiledRemedy = "no symbol tool can address a file no loaded project compiles: pass force=true to edit it as plain text - nothing compiles it, so the compile gate is skipped, but the .terse.json policy still refuses what it rejects - or load_workspace the solution whose project compiles it and edit it there with replace_symbol_body, replace_symbol or add_member";
 
     private static Result<string> Refused(string message, string remedy) => Result.Fail<string>(Errors.Invalid(message, remedy));
 }
